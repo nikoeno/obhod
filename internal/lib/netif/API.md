@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | – |
 | Build tags | – |
-| Status | planned |
+| Status | partial: List, Uplink, BindControl, MarkControl (Watch and gateway discovery pending) |
 
 ## Responsibility
 

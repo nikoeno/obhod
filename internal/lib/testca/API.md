@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | – |
 | Build tags | lab |
-| Status | planned |
+| Status | implemented (M3) |
 
 ## Responsibility
 
@@ -34,6 +34,10 @@ func (ca *CA) Issue(hosts ...string) (tls.Certificate, error)        // valid le
 func (ca *CA) IssueExpired(hosts ...string) (tls.Certificate, error)
 func (ca *CA) IssueWrongHost(hosts ...string) (tls.Certificate, error) // SAN doesn't match
 func SelfSigned(hosts ...string) (tls.Certificate, error)              // not signed by any CA
+
+// Satisfy faultserver.Certs.
+func (ca *CA) RootPool() *x509.CertPool
+func (ca *CA) IssueSelfSigned(hosts ...string) (tls.Certificate, error)
 ```
 
 ## Behavior / contract

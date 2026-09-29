@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | – |
 | Build tags | – |
-| Status | design ready |
+| Status | implemented |
 
 ## Responsibility
 
@@ -119,4 +119,4 @@ Classification logic (that's classify).
 
 ## Bootstrap (M0)
 
-`doc.go` only.
+Done (M0-M8). `Evidence` and `SNISwapResult` carry the JSON tags of the report schema; durations are nanoseconds.

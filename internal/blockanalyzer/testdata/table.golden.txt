@@ -1,0 +1,9 @@
+calibration: internet=ok dpi=yes
+network: 203.0.113.5 AS64500 EXAMPLE-NET, ZZ
+warning: foreign bypass tool running: winws (pid 4242)
+warning: example warning
+
+DOMAIN           VERDICT   BLOCKING   STAGE    SUGGESTED
+example.com      OK        none       bulk     direct
+blocked.example  TLS_RST   confirmed  tls      desync
+nx.example       DNS_FAIL  unknown    resolve  -

@@ -6,7 +6,7 @@
 | Kind | lib |
 | Binary | – |
 | Purpose | holds build version information injected at link time |
-| Consumers | internal/blockanalyzer, internal/pc, internal/router |
+| Consumers | internal/blockanalyzer, internal/lib/analyzer, internal/pc, internal/router |
 | Children | – |
 | Uses libs | – |
 | Build tags | – |

@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | internal/lib/analyzer/lib/verdict |
 | Build tags | – |
-| Status | design ready |
+| Status | implemented |
 
 ## Responsibility
 
@@ -61,6 +61,16 @@ type ASN struct {
     Prefix  netip.Prefix
 }
 
+// ErrNXDomain is returned (wrapped) when a name does not exist.
+var ErrNXDomain error
+
+// Hosts returns the known stub hosts and IPs as strings (for the classifier).
+func (s *Stubs) Hosts() []string
+
+// Learn asks ip on plain HTTP (port 80) for host; a redirect to a foreign host is an ISP block page and is
+// recorded (host and ip) in stubs. It reports whether a stub was learned.
+func Learn(ctx context.Context, dial DialFunc, host string, ip netip.Addr, stubs *Stubs) (bool, error)
+
 // LookupASN queries Team Cymru (origin.asn.cymru.com + asn.cymru.com TXT) through r.
 func LookupASN(ctx context.Context, r Resolver, ip netip.Addr) (ASN, error)
 ```
@@ -69,7 +79,9 @@ func LookupASN(ctx context.Context, r Resolver, ip netip.Addr) (ASN, error)
 
 - "Different answers" is not poisoning by itself (CDNs differ). Report poisoning only when the system answer is a known stub, a bogon/private address, or NXDOMAIN while DoH resolves.
 - FakeIP is informational, never `DNS_POISONED`.
-- DoH over HTTPS uses the injected dialer and a uTLS fingerprint.
+- DoH over HTTPS uses the injected dialer and a uTLS fingerprint (ALPN http/1.1 only) and verifies the server certificate. Endpoints should be IP-based URLs so no system lookup is needed to reach them. Endpoints are tried in order; errors name the endpoint.
+- A nil *Stubs is an empty set.
+- `Compare` treats FakeIP (198.18.0.0/15) as informational, never as a bogon.
 
 ## Config
 
@@ -89,4 +101,4 @@ Changing system DNS. DoT/DoQ (maybe later).
 
 ## Bootstrap (M0)
 
-`doc.go` only.
+Done (M0-M8).

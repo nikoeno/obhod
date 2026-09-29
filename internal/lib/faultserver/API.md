@@ -8,9 +8,9 @@
 | Purpose | runs localhost servers that misbehave in specific, DPI-like ways |
 | Consumers | internal/lib/analyzer, lab |
 | Children | – |
-| Uses libs | internal/lib/testca |
+| Uses libs | internal/lib/testca (tests) |
 | Build tags | lab |
-| Status | planned |
+| Status | implemented (M3) |
 
 ## Responsibility
 
@@ -39,6 +39,7 @@ const (
     RSTAfterRequest Behavior = "rst-after-request" // RST after the first HTTP request
     HTTPStub        Behavior = "http-stub"         // plain HTTP 302 to a stub URL
     ConnLimit       Behavior = "conn-limit"        // reset handshakes after N concurrent conns
+    SNIBlock        Behavior = "sni-block"         // valid TLS server that RSTs ClientHellos whose SNI is BlockSNI
 )
 
 type Spec struct {
@@ -48,6 +49,8 @@ type Spec struct {
     AlertCode  uint8  // TLSAlert
     StubURL    string // HTTPStub
     Limit      int    // ConnLimit
+    BlockSNI   string // SNIBlock: the server name that gets a RST
+    RejectUnknownSNI bool // SNIBlock: names outside Hosts get a TLS alert (like a CDN edge)
     Hosts      []string
 }
 
@@ -56,11 +59,23 @@ type Server struct {
     Pool *x509.CertPool // trust this in the client under test
 }
 
-// Start runs a server bound to 127.0.0.1:0; closed via t.Cleanup.
-func Start(t testing.TB, s Spec) *Server
+// Certs is what a server needs to present certificates. testca.CA implements it; it is an interface
+// here because a test-only module may not import another test-only module from non-test code.
+type Certs interface {
+    RootPool() *x509.CertPool
+    Issue(hosts ...string) (tls.Certificate, error)
+    IssueWrongHost(hosts ...string) (tls.Certificate, error)
+    IssueSelfSigned(hosts ...string) (tls.Certificate, error)
+}
 
-// Run is the non-testing form for the lab.
-func Run(ctx context.Context, listen string, s Spec, ca *testca.CA) (*Server, error)
+// Start runs a server bound to 127.0.0.1:0; closed via t.Cleanup.
+func Start(t testing.TB, s Spec, ca Certs) *Server
+
+// Run is the non-testing form for the lab. It stops when ctx is done or Close is called.
+func Run(ctx context.Context, listen string, s Spec, ca Certs) (*Server, error)
+
+// Close stops the server and drops its connections (idempotent).
+func (s *Server) Close()
 ```
 
 ## Behavior / contract

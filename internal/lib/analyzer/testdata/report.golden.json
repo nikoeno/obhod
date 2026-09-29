@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "version": "v0.1.0",
+  "started_at": "2026-01-02T03:04:05Z",
+  "network": {
+    "public_ip": "203.0.113.5",
+    "asn": {
+      "number": 64500,
+      "name": "EXAMPLE-NET, ZZ",
+      "country": "ZZ",
+      "prefix": "203.0.113.0/24"
+    }
+  },
+  "calibration": {
+    "internet": "ok",
+    "dpi_present": "yes",
+    "warnings": [
+      "foreign bypass tool running: winws (pid 4242)"
+    ]
+  },
+  "results": [
+    {
+      "target": {
+        "domain": "example.com",
+        "port": 443,
+        "path": "/"
+      },
+      "route": "direct",
+      "ip": "93.184.216.34",
+      "verdict": "OK",
+      "blocking": "none",
+      "stage": "bulk",
+      "evidence": {
+        "tls_version": "TLS 1.3",
+        "cert_subject": "CN=example.com",
+        "http_status": 200,
+        "rx_bytes": 70000,
+        "tx_bytes": 900,
+        "rtt": 12000000,
+        "stage_times": {
+          "tcp": 12000000
+        }
+      },
+      "suggestion": "direct",
+      "started_at": "2026-01-02T03:04:05Z",
+      "duration": 250000000
+    },
+    {
+      "target": {
+        "domain": "blocked.example",
+        "port": 443,
+        "path": "/"
+      },
+      "route": "direct",
+      "ip": "198.51.100.7",
+      "verdict": "TLS_RST",
+      "blocking": "confirmed",
+      "stage": "tls",
+      "evidence": {
+        "err": "read tcp: connection reset by peer [syscall.Errno]",
+        "tx_bytes": 517,
+        "sni_swap": {
+          "sni": "www.microsoft.com",
+          "verdict": "OK"
+        }
+      },
+      "suggestion": "desync",
+      "suggestion_note": "only the SNI is blocked",
+      "started_at": "2026-01-02T03:04:05Z",
+      "duration": 40000000
+    },
+    {
+      "target": {
+        "domain": "nx.example",
+        "port": 443,
+        "path": "/"
+      },
+      "route": "direct",
+      "verdict": "DNS_FAIL",
+      "blocking": "unknown",
+      "stage": "resolve",
+      "evidence": {
+        "err": "lookup nx.example: no such domain"
+      },
+      "started_at": "2026-01-02T03:04:05Z",
+      "duration": 1000000
+    }
+  ],
+  "warnings": [
+    "example warning"
+  ]
+}

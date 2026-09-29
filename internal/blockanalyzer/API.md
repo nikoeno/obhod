@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | internal/lib/analyzer, internal/lib/route, internal/lib/paths, internal/lib/version |
 | Build tags | – |
-| Status | design ready (see internal/lib/analyzer/AGENTS.md) |
+| Status | implemented |
 
 ## Responsibility
 
@@ -66,4 +66,4 @@ Anything stateful (no store, no scheduling).
 
 ## Bootstrap (M0)
 
-`doc.go`, plus `Main` supporting only `--version` (prints `version.String("blockanalyzer")`) and `--help`; anything else prints "not implemented yet" and returns 1.
+Done (M0-M8). Exit codes: 0 report produced, 1 usage/config error or interrupted run (partial report is printed), 2 calibration failed. Output to stdout is only the table, or only the JSON when `--json -`.

@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | internal/lib/analyzer/lib/verdict, internal/lib/route, internal/lib/netif |
 | Build tags | – |
-| Status | design ready (direct only) |
+| Status | implemented |
 
 ## Responsibility
 
@@ -29,7 +29,7 @@ type Dialer interface {
 type DirectOptions struct {
     Uplink    netif.Interface // zero value → netif.Uplink() at construction
     Mark      uint32          // Linux: optional SO_MARK
-    BindIface bool            // default true: pin to the uplink (bypass TUN)
+    BindIface bool            // pin sockets to the uplink (bypasses a TUN default route); false = plain dial
 }
 
 func NewDirect(o DirectOptions) (Dialer, error)
@@ -70,4 +70,4 @@ Desync/tunnel/proxy dialers (deferred), DNS.
 
 ## Bootstrap (M0)
 
-`doc.go` only.
+Done (M0-M8).

@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | internal/lib/analyzer/lib/verdict |
 | Build tags | – |
-| Status | design ready |
+| Status | implemented |
 
 ## Responsibility
 
@@ -76,4 +76,4 @@ Producing the errors (that's the analyzer root pipeline).
 
 ## Bootstrap (M0)
 
-`doc.go` only.
+Done (M0-M8).

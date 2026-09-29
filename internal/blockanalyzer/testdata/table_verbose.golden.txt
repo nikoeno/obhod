@@ -1,0 +1,9 @@
+calibration: internet=ok dpi=yes
+network: 203.0.113.5 AS64500 EXAMPLE-NET, ZZ
+warning: foreign bypass tool running: winws (pid 4242)
+warning: example warning
+
+DOMAIN           VERDICT   BLOCKING   STAGE    SUGGESTED  IP             EVIDENCE
+example.com      OK        none       bulk     direct     93.184.216.34  http=200 tls=TLS 1.3 rx=70000 tx=900
+blocked.example  TLS_RST   confirmed  tls      desync     198.51.100.7   err=read tcp: connection reset by peer rx=0 tx=517 sni-swap(www.microsoft.com)=OK note=only the SNI is blocked
+nx.example       DNS_FAIL  unknown    resolve  -          -              err=lookup nx.example: no such domain
