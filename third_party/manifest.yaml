@@ -1,0 +1,10 @@
+# Pinned third-party binaries. Never commit the binaries themselves.
+# Format (filled in by the human):
+#   binaries:
+#     - name: <tool>
+#       version: <pinned version>
+#       platforms:
+#         <os>-<arch>:
+#           url: <download url>
+#           sha256: <hex digest>
+binaries: []

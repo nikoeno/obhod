@@ -1,0 +1,26 @@
+# build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+
+# third-party binaries (fetched by script, verified by manifest)
+/third_party/bin/*
+!/third_party/bin/.gitkeep
+
+# runtime data and secrets — never commit
+/runtime/
+*.log
+.env
+*.key
+*.pem
+secrets/
+app.yaml
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
