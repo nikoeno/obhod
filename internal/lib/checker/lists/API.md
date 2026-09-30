@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | internal/lib/route |
 | Build tags | – |
-| Status | planned |
+| Status | implemented |
 
 ## Responsibility
 
@@ -59,6 +59,6 @@ Parse fixtures, precedence, dedup, warnings with line numbers.
 
 Downloading lists from URLs (maybe later), app-specific formats.
 
-## Bootstrap (M0)
+## Bootstrap
 
-`doc.go` only.
+Done: M3.

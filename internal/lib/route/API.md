@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | – |
 | Build tags | – |
-| Status | partial: Route, Parse, Normalize; Entry, Table, Diff not implemented yet |
+| Status | implemented: Route, Parse, Normalize, Source, Entry, Table, Diff |
 
 ## Responsibility
 

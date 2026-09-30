@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | internal/lib/route, internal/lib/analyzer |
 | Build tags | – |
-| Status | planned |
+| Status | implemented |
 
 ## Responsibility
 
@@ -44,12 +44,15 @@ type Pending struct {
     Since time.Time
 }
 
-func (d Decision) Expired(now time.Time) bool
+func (d Decision) Expired(now time.Time) bool // false when ExpiresAt is zero
+
+// Clone returns a deep copy (Pending and Last are not shared).
+func (d Decision) Clone() Decision
 ```
 
 ## Behavior / contract
 
-JSON-serializable with stable field names (used by the store file format).
+JSON-serializable with stable snake_case field names (`domain`, `route`, `source`, `decided_at`, `checked_at`, `expires_at`, `pending`, `last`; `pending`/`last` are omitted when empty), pinned by a golden file. `NetworkID.Valid`: prefix `asn:` or `gw:`, no whitespace, at most 128 bytes (`MaxIDLen`).
 
 ## Config
 
@@ -67,6 +70,6 @@ JSON round-trip, `Expired`.
 
 Logic (decide), persistence (store).
 
-## Bootstrap (M0)
+## Bootstrap
 
-`doc.go` only.
+Done: M1.

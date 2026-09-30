@@ -6,7 +6,7 @@
 | Kind | lib |
 | Binary | – |
 | Purpose | provides an injectable clock with a real and a fake implementation |
-| Consumers | internal/lib/analyzer, internal/lib/checker, internal/lib/checker/netwatch, internal/lib/checker/schedule, internal/lib/checker/store, internal/pc, internal/pc/monitor, internal/pc/procman, internal/router |
+| Consumers | internal/lib/analyzer, internal/lib/checker, internal/lib/checker/netwatch, internal/lib/checker/schedule, internal/lib/checker/store, internal/lib/netif, internal/pc, internal/pc/monitor, internal/pc/procman, internal/router |
 | Children | – |
 | Uses libs | – |
 | Build tags | – |

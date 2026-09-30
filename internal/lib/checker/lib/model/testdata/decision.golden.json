@@ -1,0 +1,16 @@
+{
+  "domain": "example.com",
+  "route": "desync",
+  "source": "checked",
+  "decided_at": "2026-01-02T03:04:05Z",
+  "checked_at": "2026-01-02T04:04:05Z",
+  "expires_at": "2026-01-03T04:04:05Z",
+  "pending": {
+    "route": "tunnel",
+    "count": 1,
+    "since": "2026-01-02T04:04:05Z"
+  },
+  "last": {
+    "direct": "TLS_RST"
+  }
+}

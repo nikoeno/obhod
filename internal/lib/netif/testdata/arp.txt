@@ -1,0 +1,6 @@
+IP address       HW type     Flags       HW address            Mask     Device
+192.168.0.1      0x1         0x2         aa:bb:cc:dd:ee:ff     *        eth0
+172.16.0.1       0x1         0x0         00:00:00:00:00:00     *        wlan0
+172.16.0.1       0x1         0x2         11:22:33:44:55:66     *        wlan0
+10.0.0.9         0x1         0x2         not-a-mac             *        eth0
+bad

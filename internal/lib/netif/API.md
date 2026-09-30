@@ -8,9 +8,9 @@
 | Purpose | finds the physical uplink interface and binds sockets to it, bypassing TUN adapters |
 | Consumers | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc/desync |
 | Children | – |
-| Uses libs | – |
+| Uses libs | internal/lib/clock |
 | Build tags | – |
-| Status | partial: List, Uplink, BindControl, MarkControl (Watch and gateway discovery pending) |
+| Status | implemented (SSID is always empty; GatewayMAC is Linux only) |
 
 ## Responsibility
 
@@ -55,7 +55,8 @@ func Watch(ctx context.Context) (<-chan Event, error)
 ## Behavior / contract
 
 - Virtual detection: by adapter type/driver on Windows (wintun, TAP), and by `/sys/class/net/<if>` type plus name heuristics (`tun*`, `wg*`, `sing*`) on Linux.
-- `Watch` guarantees at least one event within a few seconds of an uplink change. Consumers must debounce.
+- `Uplink` fills Gateway (default IPv4 route) and, on Linux, GatewayMAC (from the ARP table); SSID is best effort and currently always "". Windows: Gateway only (GetAdaptersInfo). Other OSes: empty.
+- `Watch` polls every 2 s (snapshot of uplink name/index, addresses, gateway, link up); one event per poll, highest-priority change wins (LinkDown, UplinkChanged, AddressChanged). It guarantees at least one event within a few seconds of an uplink change. Consumers must debounce.
 - `SO_BINDTODEVICE` and `SO_MARK` need `CAP_NET_RAW` / `CAP_NET_ADMIN`. Without them, return `ErrPermission`; never escalate.
 
 ## Config

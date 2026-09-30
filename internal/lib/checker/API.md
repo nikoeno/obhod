@@ -10,7 +10,7 @@
 | Children | internal/lib/checker/decide, internal/lib/checker/store, internal/lib/checker/netwatch, internal/lib/checker/lists, internal/lib/checker/schedule, internal/lib/checker/lib/model |
 | Uses libs | internal/lib/analyzer, internal/lib/route, internal/lib/clock |
 | Build tags | – |
-| Status | planned |
+| Status | implemented (lab scenario M8 pending) |
 
 ## Responsibility
 
@@ -28,6 +28,7 @@ type Deps struct {
     Dialers []analyzer.Dialer // routes the checker may probe (currently: direct)
     Clock   clock.Clock
     DataDir string            // where store keeps decisions
+    Resolver analyzer.Resolver // DoH resolver for network identification; nil → gateway IDs only
     // Optional overrides for tests; nil → real implementations from children.
     Network NetworkSource
 }
@@ -65,6 +66,11 @@ func (c *Checker) CheckNow(domains ...string)
 
 func (c *Checker) Status() Status
 
+// FakeNetwork is a scripted NetworkSource for tests (here and in apps).
+type FakeNetwork struct{ /* ... */ }
+func NewFakeNetwork(initial Network) *FakeNetwork
+func (f *FakeNetwork) Set(n Network) // switch and announce on Changes (latest-wins)
+
 type Failure struct {
     Domain  string
     Route   route.Route
@@ -97,7 +103,11 @@ The cycle, on each trigger from `schedule`:
 Other rules:
 
 - **Network change:** switch to that network's stored decisions immediately (publish), then trigger a check.
-- **Unknown network:** candidates get `cfg.UnknownDefault` (tunnel) until the first check.
+- **Unknown network:** candidates get `cfg.UnknownDefault` (tunnel) until the first check. No probing happens until the network is identified (the identification triggers the check). Candidates with no decision on a known network get the same default (`SourceDefault`).
+- **Results of a run that finished after the network changed are dropped.** A failed calibration or a failed `Runner.Run` records a warning and changes nothing.
+- **Failures:** `ReportFailure` maps the domain to its table entry by suffix; static entries and failures on a route other than the current one are ignored. A live failure does not count as a decision confirmation, it only triggers a recheck.
+- **Expiry:** at start and on network switch, expired decisions trigger one targeted recheck; afterwards a timer fires at the earliest upcoming expiry. An inconclusive recheck is not retried by this path (the periodic check covers it).
+- **Start:** `Run` prunes networks unseen for `Retention` and decisions of domains no longer candidates.
 - **Expired entries** are still used, and trigger a recheck.
 - Only one check runs at a time. Triggers arriving during a run are merged.
 
@@ -110,15 +120,16 @@ type Config struct {
     Decide         decide.Policy
     Store          store.Config
     Netwatch       netwatch.Config
-    UnknownDefault route.Route // default tunnel
+    UnknownDefault route.Route   // default tunnel; must be direct, desync or tunnel
+    Retention      time.Duration // networks unseen for this long are pruned at start; default 90 days
 }
 ```
 
-(Child config types are re-exported by the checker root as `checker.ListsConfig` etc., so apps don't import children.)
+Child config types are re-exported as type aliases: `checker.ListsConfig`, `ScheduleConfig`, `DecidePolicy`, `StoreConfig`, `NetwatchConfig`; `Config` uses them, so apps don't import children.
 
 ## Errors
 
-`New` fails on invalid config or an unreadable store. `Run` returns only on ctx cancel or a fatal store error. Probe problems never stop the loop.
+`New` fails on invalid config, a missing/unreadable list, or an unreadable store. `Run` returns only on ctx cancel or a fatal store error (a failed `Put`, `Touch` or `Prune`), and may be called once. Probe problems never stop the loop; they show up in `Status.Warnings`.
 
 ## Testing
 
@@ -135,6 +146,6 @@ With a fake Runner, fake NetworkSource, fake clock and in-memory store, cover:
 
 Generating any config file, starting processes, UI.
 
-## Bootstrap (M0)
+## Bootstrap
 
-`doc.go` only.
+Done: M1–M7. Remaining: the lab scenario (M8) in PLAN.md. Design decisions, deviations and known gaps: DESIGN.md.

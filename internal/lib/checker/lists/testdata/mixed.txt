@@ -1,0 +1,10 @@
+﻿# candidates
+Example.COM   # trailing
+*.wild.org
+.dot.net
+
+https://bad.example/x
+1.2.3.4
+bücher.de
+example.com
+host:443

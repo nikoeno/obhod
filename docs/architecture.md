@@ -57,21 +57,21 @@ The architecture rules (module shape, placement, import rules a-e, API.md header
 | `internal/lib/analyzer/dialer` | child | internal/lib/analyzer | – | design ready (direct only) |
 | `internal/lib/analyzer/dnscheck` | child | internal/lib/analyzer | – | design ready |
 | `internal/lib/analyzer/lib/verdict` | lib | internal/lib/analyzer, internal/lib/analyzer/classify, internal/lib/analyzer/dialer, internal/lib/analyzer/dnscheck | – | design ready |
-| `internal/lib/checker` | lib | internal/pc, internal/router | internal/lib/checker/decide, internal/lib/checker/store, internal/lib/checker/netwatch, internal/lib/checker/lists, internal/lib/checker/schedule, internal/lib/checker/lib/model | planned |
-| `internal/lib/checker/decide` | child | internal/lib/checker | – | planned |
-| `internal/lib/checker/lib/model` | lib | internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/netwatch, internal/lib/checker/schedule, internal/lib/checker/store | – | planned |
-| `internal/lib/checker/lists` | child | internal/lib/checker | – | planned |
-| `internal/lib/checker/netwatch` | child | internal/lib/checker | – | planned |
-| `internal/lib/checker/schedule` | child | internal/lib/checker | – | planned |
-| `internal/lib/checker/store` | child | internal/lib/checker | – | planned |
+| `internal/lib/checker` | lib | internal/pc, internal/router | internal/lib/checker/decide, internal/lib/checker/store, internal/lib/checker/netwatch, internal/lib/checker/lists, internal/lib/checker/schedule, internal/lib/checker/lib/model | implemented |
+| `internal/lib/checker/decide` | child | internal/lib/checker | – | implemented |
+| `internal/lib/checker/lib/model` | lib | internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/netwatch, internal/lib/checker/schedule, internal/lib/checker/store | – | implemented |
+| `internal/lib/checker/lists` | child | internal/lib/checker | – | implemented |
+| `internal/lib/checker/netwatch` | child | internal/lib/checker | – | implemented |
+| `internal/lib/checker/schedule` | child | internal/lib/checker | – | implemented |
+| `internal/lib/checker/store` | child | internal/lib/checker | – | implemented |
 | `internal/lib/clock` | lib | internal/lib/analyzer, internal/lib/checker, internal/lib/checker/netwatch, internal/lib/checker/schedule, internal/lib/checker/store, internal/pc, internal/pc/monitor, internal/pc/procman, internal/router | – | planned |
 | `internal/lib/faultserver` | test-only | internal/lib/analyzer, lab | – | planned |
 | `internal/lib/netif` | lib | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc/desync | – | planned |
-| `internal/lib/paths` | lib | internal/blockanalyzer, internal/pc, internal/router | – | planned |
+| `internal/lib/paths` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
 | `internal/lib/proc` | lib | internal/lib/analyzer, internal/pc/procman | – | planned |
 | `internal/lib/route` | lib | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop | – | planned |
 | `internal/lib/testca` | test-only | internal/lib/analyzer, internal/lib/faultserver, lab | – | planned |
-| `internal/lib/version` | lib | internal/blockanalyzer, internal/pc, internal/router | – | planned |
+| `internal/lib/version` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
 | `internal/pc` | app | cmd/splitter | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/lib/clashapi | planned |
 | `internal/pc/desync` | child | internal/pc | internal/pc/desync/winws, internal/pc/desync/nfqws | planned |
 | `internal/pc/desync/nfqws` | child | internal/pc/desync | – | planned |

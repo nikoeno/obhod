@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | internal/lib/checker/lib/model, internal/lib/analyzer, internal/lib/route |
 | Build tags | – |
-| Status | planned |
+| Status | implemented |
 
 ## Responsibility
 
@@ -73,6 +73,6 @@ Exhaustive table tests: every verdict combination, hysteresis sequences (flip-fl
 
 Storage, scheduling, networkId.
 
-## Bootstrap (M0)
+## Bootstrap
 
-`doc.go` only.
+Done: M2.

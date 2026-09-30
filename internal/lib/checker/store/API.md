@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | internal/lib/checker/lib/model, internal/lib/clock |
 | Build tags | – |
-| Status | planned |
+| Status | implemented |
 
 ## Responsibility
 
@@ -24,11 +24,16 @@ package store
 type Store interface {
     Get(net model.NetworkID, domain string) (model.Decision, bool)
     All(net model.NetworkID) []model.Decision
-    Put(net model.NetworkID, ds ...model.Decision) error
+    Put(net model.NetworkID, ds ...model.Decision) error // also sets LastSeen = now
+    // Touch marks net as seen and records its label without writing decisions.
+    Touch(net model.NetworkID, label string) error
     Networks() []NetworkInfo
-    // Prune removes networks not seen since before and decisions for domains not in keep.
+    // Prune removes networks not seen since before and decisions for domains not in keep
+    // (keep == nil: no domain pruning; empty non-nil: drop all decisions).
     Prune(before time.Time, keep []string) error
-    Close() error
+    // Warnings returns problems found by Open (e.g. a corrupt file that was set aside).
+    Warnings() []string
+    Close() error // flushes; writes fail with ErrClosed afterwards
 }
 
 type NetworkInfo struct {
@@ -51,8 +56,10 @@ func NewMemory() Store // tests
 
 - File format: `{"schema":1,"networks":{"<id>":{"label":…,"last_seen":…,"decisions":{"<domain>":Decision}}}}`.
 - Atomic write: temp file in the same dir → fsync → rename → fsync dir (where supported). The file is 0600.
-- A corrupt file → rename it to `decisions.json.corrupt-<ts>`, start empty, and report via the returned warning (don't crash).
-- Goroutine-safe. `Put` of an unchanged decision doesn't count as a write (saves flash).
+- A corrupt file → rename it to `decisions.json.corrupt-<ts>`, start empty, and report it through `Warnings()` (don't crash). Leftover `decisions-*.tmp` files are removed on `Open`.
+- Goroutine-safe. `Put` of an unchanged decision doesn't count as a write (saves flash); `LastSeen` alone is updated in memory and persisted with the next real write.
+- `FlushInterval > 0`: writes are coalesced by a `clock` timer; a failed write is returned from the next `Put`/`Touch`/`Close`. `Close` flushes.
+- Permissions: 0600 via `Chmod` on Linux; on Windows the file inherits the data dir ACL set by `paths.Ensure`.
 
 ## Config
 
@@ -70,6 +77,6 @@ Round-trip, a crash mid-write (a leftover temp file is ignored), corrupt-file re
 
 Deciding anything, encryption at rest.
 
-## Bootstrap (M0)
+## Bootstrap
 
-`doc.go` only.
+Done: M4.

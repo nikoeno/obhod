@@ -26,12 +26,14 @@ type Interface struct {
 	Virtual    bool             // TUN/TAP/wintun/loopback
 }
 
-var virtualHints = []string{"tun", "tap", "wintun", "wg", "sing", "utun", "meta", "clash", "vpn", "veth", "docker", "vethernet", "loopback", "virtual"}
+// virtualNameFragments are lowercase substrings of interface names that mark an adapter as virtual
+// (TUN/TAP, VPN, container or loopback devices) and not as physical hardware.
+var virtualNameFragments = []string{"tun", "tap", "wintun", "wg", "sing", "utun", "meta", "clash", "vpn", "veth", "docker", "vethernet", "loopback", "virtual"}
 
 // isVirtualName applies the name heuristics for virtual adapters.
 func isVirtualName(name string) bool {
 	n := strings.ToLower(name)
-	for _, h := range virtualHints {
+	for _, h := range virtualNameFragments {
 		if strings.Contains(n, h) {
 			return true
 		}
@@ -69,7 +71,17 @@ func List(ctx context.Context) ([]Interface, error) {
 // Uplink returns the physical interface that carries IPv4 traffic to the internet, skipping virtual ones.
 // The kernel's choice is learned with a connected UDP socket (no packet is sent); when that choice is a
 // virtual adapter (a TUN client owns the default route), the first physical interface with an IPv4 address is used.
+// Gateway, GatewayMAC and SSID are filled in on a best-effort basis.
 func Uplink(ctx context.Context) (Interface, error) {
+	ifc, err := findUplink(ctx)
+	if err != nil {
+		return Interface{}, err
+	}
+	fillDetails(ctx, &ifc)
+	return ifc, nil
+}
+
+func findUplink(ctx context.Context) (Interface, error) {
 	all, err := List(ctx)
 	if err != nil {
 		return Interface{}, err
