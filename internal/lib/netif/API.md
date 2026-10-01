@@ -71,6 +71,19 @@ None (callers pass what they need).
 
 Pure parts (virtual detection from fixtures, route table parsing) are unit-tested. Binding is covered in the Linux lab (a socket bound to the uplink bypasses a default route via a fake TUN). The Windows part is covered by windows-smoke.
 
+## Planned: sturdier uplink detection
+
+Name fragments (`tun`, `meta`, `wg`, ...) are fragile: a VPN adapter can be named anything and a physical one can match by accident. Planned order of decisions, no public API change:
+
+1. Ask the OS whether an adapter is hardware:
+   - Windows: `GetAdaptersAddresses` / `GetIfEntry2`; `IfType` (Ethernet 6, Wi-Fi 71 vs tunnel 131, loopback 24) and the `HardwareInterface` flag (wintun/TAP do not set it).
+   - Linux: `/sys/class/net/<if>/device` exists for physical NICs; `/sys/devices/virtual/net/` holds virtual ones; optionally the netlink link kind (`tun`, `veth`, `wireguard`, `bridge`).
+   - macOS: SystemConfiguration hardware ports (`SCNetworkInterfaceCopyAll`); `utun*` is not listed.
+2. Choose among physical interfaces by the routing table: take the `0.0.0.0/0` route (lowest metric) whose interface is not virtual, even when a TUN client shadows it with `0.0.0.0/1` + `128.0.0.0/1`. This also yields the real Gateway.
+3. Keep the name heuristic only as a last-resort fallback.
+
+OS-specific parts go in `*_windows.go` / `*_linux.go`; other OSes keep the current behavior or return `ErrUnsupported`. Any new dependency (e.g. `golang.org/x/sys`, `vishvananda/netlink`) needs approval first (root `AGENTS.md`, Dependencies).
+
 ## Out of scope
 
 Changing routes or interfaces. Firewall rules.

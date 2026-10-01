@@ -35,7 +35,8 @@ type Stats struct {
     Failures map[route.Route]int64
 }
 
-// RouteOf maps a Clash connection (outbound chain / rule) to a route.
+// RouteOf maps a Clash connection to a route by its outbound tag (last element of Chains);
+// the tags direct, desync, tunnel and proxy match the route names.
 type RouteOf func(c clashapi.Connection) route.Route
 
 type Config struct {

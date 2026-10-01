@@ -5,16 +5,17 @@
 | Path | internal/pc/desync/winws |
 | Kind | child |
 | Binary | – |
-| Purpose | renders winws (zapret, WinDivert) arguments and hostlist |
+| Purpose | renders winws2 (zapret2, WinDivert) arguments and hostlist |
 | Consumers | internal/pc/desync |
 | Children | – |
 | Uses libs | – |
 | Build tags | – |
 | Status | planned |
+| Pinned | zapret2 1.0.5.2 (`third_party/manifest.yaml`) |
 
 ## Responsibility
 
-Knows winws's command-line format and nothing else.
+Knows the command-line format of winws2 (zapret2) and nothing else. zapret2 strategies are Lua: the engine loads the Lua libraries shipped next to the binary, and `Strategy` holds the profile arguments (`--filter-*`, `--payload`, `--out-range`, `--lua-desync=...`) unchanged.
 
 ## Public API
 
@@ -22,8 +23,10 @@ Knows winws's command-line format and nothing else.
 package winws
 
 type Input struct {
-    Binary       string
-    Strategy     []string
+    Binary       string   // path to winws2.exe (WinDivert.dll, WinDivert64.sys, cygwin1.dll next to it)
+    LuaDir       string   // default: <dir of Binary>/lua
+    LuaInit      []string // Lua files in LuaDir to load, in order; default zapret-lib.lua, zapret-antidpi.lua
+    Strategy     []string // zapret2 profile args, passed through verbatim
     Hostlist     []string // domains
     IfIndex      int      // uplink interface index
     ExcludeIPs   []netip.Prefix
@@ -42,8 +45,10 @@ func Render(in Input) (Output, error)
 
 ## Behavior / contract
 
-- The WinDivert filter includes: outbound, TCP on `Ports`, `IfIdx == IfIndex`, not `ExcludeIPs`, not `ExcludePorts` (as local port).
-- Flag names (`--wf-*`, `--hostlist`, raw filter syntax) must be verified against the **pinned zapret version**.
+- Argument order: `--wf-tcp-out=<Ports>`, `--wf-raw-filter=<filter>`, one `--lua-init=@<LuaDir>/<file>` per `LuaInit` entry, `--hostlist=hostlist.txt`, then `Strategy`.
+- `--wf-raw-filter` is combined with the rest of the interception filter by AND (zapret2 README). It holds `ifIdx == IfIndex`, not `ExcludeIPs` (`ip.DstAddr` / `ipv6.DstAddr`), not `ExcludePorts` (as `tcp.SrcPort`).
+- Interception is outbound only (`--wf-tcp-out`), as in the contract's "uplink only" rule. Incoming interception (`--wf-tcp-in`, needed by some `zapret-auto.lua` orchestrators) is out of scope until a strategy needs it.
+- Flag names and the WinDivert filter syntax must be verified against the **pinned zapret2 version** (1.0.5.2).
 - Deterministic output.
 
 ## Config
@@ -52,7 +57,7 @@ None.
 
 ## Errors
 
-Invalid input (no domains, zero IfIndex).
+Invalid input (no domains, zero IfIndex, empty LuaInit file name).
 
 ## Testing
 

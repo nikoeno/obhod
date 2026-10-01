@@ -4,7 +4,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null)
 LDFLAGS := -X $(MODULE)/internal/lib/version.Version=$(VERSION) -X $(MODULE)/internal/lib/version.Commit=$(COMMIT)
 CMDS    := $(notdir $(wildcard cmd/*))
 
-.PHONY: build test test-lab arch vet lint cross clean
+.PHONY: build test test-lab arch vet lint cross clean fetch fetch-check
 
 build:
 	@mkdir -p bin
@@ -30,6 +30,14 @@ cross:
 	GOOS=linux GOARCH=amd64 go build ./...
 	GOOS=linux GOARCH=arm64 go build ./...
 	GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build ./...
+
+# Download and verify the pinned third-party binaries (third_party/manifest.yaml).
+fetch:
+	go run ./scripts/fetch
+
+# Verify installed third-party binaries without network access.
+fetch-check:
+	go run ./scripts/fetch -check
 
 clean:
 	rm -rf bin dist

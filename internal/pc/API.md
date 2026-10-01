@@ -67,9 +67,13 @@ Adapters live here:
 
 As above. Secrets are never in `app.yaml`; they're referenced by file name inside `Paths.Secrets`.
 
+The Clash API secret is internal: the app generates a random one (`crypto/rand`) at every start, puts it into the generated sing-box config (0600, in `Paths.Run`) and hands it to its own Clash API client. It is not configurable and never logged.
+
 ## Errors
 
-Exit codes: 0 clean shutdown, 1 config/usage error, 2 needs admin (printed with instructions), 3 runtime failure.
+Exit codes: 0 clean shutdown, 1 config/usage error, 2 needs admin or a manual setup step (printed with instructions), 3 runtime failure.
+
+Linux with desync domains: `run` checks read-only whether the `inet splitter` nftables table exists. If it is missing, `run` refuses to start, prints the desync plan's `Setup` commands (and `Teardown` for later) and exits 2. The app never applies firewall rules itself.
 
 ## Testing
 

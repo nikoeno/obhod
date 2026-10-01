@@ -5,7 +5,7 @@
 | Path | internal/pc/desync |
 | Kind | child |
 | Binary | – |
-| Purpose | builds the local desync engine plan (winws or nfqws) for the desync domains |
+| Purpose | builds the local desync engine plan (zapret2: winws2 or nfqws2) for the desync domains |
 | Consumers | internal/pc |
 | Children | internal/pc/desync/winws, internal/pc/desync/nfqws |
 | Uses libs | internal/lib/route, internal/lib/netif |
@@ -24,18 +24,23 @@ package desync
 type Engine string
 
 const (
-    WinWS Engine = "winws" // Windows
-    NFQWS Engine = "nfqws" // Linux
+    WinWS Engine = "winws2" // Windows (zapret2)
+    NFQWS Engine = "nfqws2" // Linux (zapret2)
 )
 
 type Config struct {
     Engine       Engine   // default by GOOS
     Binary       string
-    Strategy     []string // engine args found in Stage A (e.g. split/fake options)
+    Strategy     []string // zapret2 profile args (e.g. --filter-l7=tls --payload=tls_client_hello --lua-desync=...)
+    LuaInit      []string // Lua libraries to load; default zapret-lib.lua, zapret-antidpi.lua
     ExcludeIPs   []netip.Prefix // VPS IP(s); required
     ExcludePorts []PortRange    // probe source-port ranges (future)
     Ports        []uint16       // TCP ports to act on; default 443, 80
 }
+
+// PortRange is an inclusive port range: [0] is the first port, [1] the last.
+// The children (winws, nfqws) take the same shape as [][2]uint16.
+type PortRange [2]uint16
 
 type Plan struct {
     Engine   Engine

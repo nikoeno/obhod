@@ -14,7 +14,7 @@
 
 ## Responsibility
 
-Lifecycle of external binaries (sing-box, winws/nfqws): ordered start/stop, restart with backoff, output capture, and a guarantee of no orphans.
+Lifecycle of external binaries (sing-box, winws2/nfqws2): ordered start/stop, restart with backoff, output capture, and a guarantee of no orphans.
 
 ## Public API
 
@@ -31,6 +31,14 @@ type Spec struct {
     StopTimeout time.Duration                   // graceful stop before kill; default 5s
     Restart     RestartPolicy                   // never | on-failure (default)
 }
+
+// RestartPolicy says what the manager does when a process exits on its own.
+type RestartPolicy string
+
+const (
+    RestartOnFailure RestartPolicy = "on-failure" // default (also for ""): restart with backoff
+    RestartNever     RestartPolicy = "never"
+)
 
 type State string // starting, running, stopping, stopped, failed
 
@@ -73,7 +81,9 @@ func (m *Manager) CleanupStale(ctx context.Context, names ...string) error
 
 ## Behavior / contract
 
-- Windows: every child is assigned to a Job Object with `KILL_ON_JOB_CLOSE`. Linux: `Pdeathsig=SIGKILL` + its own process group.
+- Children never outlive the manager's process, even when it crashes or is killed:
+  - Windows: every child is assigned to a Job Object with `KILL_ON_JOB_CLOSE`. The Win32 calls (`CreateJobObjectW`, `SetInformationJobObject`, `AssignProcessToJobObject`) are loaded from `kernel32.dll` via `syscall.NewLazyDLL`, so no extra dependency is needed.
+  - Linux: `Pdeathsig=SIGKILL` + its own process group. Linux sends the signal when the *thread* that started the child exits, so all children are started from one goroutine locked to its OS thread (`runtime.LockOSThread`) that lives as long as the manager.
 - The manager never elevates privileges. If a child fails because admin is needed, it returns `ErrNeedsAdmin` with guidance.
 - stdout/stderr go to a ring buffer and the app log. They are never parsed for decisions.
 

@@ -32,9 +32,9 @@ The architecture rules (module shape, placement, import rules a-e, API.md header
     - `internal/lib/testca`: creates an in-memory test certificate authority for lab and fault-server tests
     - `internal/lib/version`: holds build version information injected at link time
   - `internal/pc`: runs the desktop app: checker, sing-box, desync engine, monitor and status page
-    - `internal/pc/desync`: builds the local desync engine plan (winws or nfqws) for the desync domains
-      - `internal/pc/desync/nfqws`: renders nfqws arguments, hostlist and nftables rules
-      - `internal/pc/desync/winws`: renders winws (zapret, WinDivert) arguments and hostlist
+    - `internal/pc/desync`: builds the local desync engine plan (zapret2: winws2 or nfqws2) for the desync domains
+      - `internal/pc/desync/nfqws`: renders nfqws2 (zapret2) arguments, hostlist and nftables rules
+      - `internal/pc/desync/winws`: renders winws2 (zapret2, WinDivert) arguments and hostlist
       - `internal/pc/lib/clashapi`: a minimal client for sing-box's Clash-compatible API
     - `internal/pc/monitor`: watches live connections via the Clash API, detects failures and counts traffic per route
     - `internal/pc/procman`: starts, stops, restarts and supervises child processes that die with the parent

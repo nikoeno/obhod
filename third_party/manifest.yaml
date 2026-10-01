@@ -1,10 +1,100 @@
 # Pinned third-party binaries. Never commit the binaries themselves.
-# Format (filled in by the human):
+# Format (see docs/HUMAN-third-party.md):
 #   binaries:
 #     - name: <tool>
 #       version: <pinned version>
+#       license: <spdx id>
+#       source: <official release page>
 #       platforms:
 #         <os>-<arch>:
 #           url: <download url>
-#           sha256: <hex digest>
-binaries: []
+#           sha256: <archive digest>
+#           files:            # extracted into third_party/bin/<os>-<arch>/
+#             - from: <path inside the archive>
+#               to: <file name>
+#               sha256: <file digest>
+binaries:
+  - name: sing-box
+    version: "1.14.2"
+    license: GPL-3.0-or-later
+    source: https://github.com/SagerNet/sing-box/releases/tag/v1.14.2
+    platforms:
+      windows-amd64:
+        url: https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-windows-amd64.zip
+        sha256: c2d8bfff918755808781dfdeeb8581b6c91eb3a243d9a7b55483cfc0c0684d32
+        files:
+          - from: sing-box-1.14.2-windows-amd64/sing-box.exe
+            to: sing-box.exe
+            sha256: 7bbef1dea9189ee12799ae834ea4b4658355da25c47a21ad8804904c0ccd9410
+          - from: sing-box-1.14.2-windows-amd64/libcronet.dll
+            to: libcronet.dll
+            sha256: 3217c6260fbca5f16072e0b79735742f40109a63bb0ff88fd6b96dd6b54a2928
+          - from: sing-box-1.14.2-windows-amd64/LICENSE
+            to: LICENSE.sing-box
+            sha256: bb3805862b583aee73ad6f7805ec634747a37257a637a3069857843f05ea589c
+      linux-amd64:
+        url: https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-linux-amd64.tar.gz
+        sha256: a684484d7477d1437282ee411f4d131d0340aaad60a7868841ebd5d87dd8a0c6
+        files:
+          - from: sing-box-1.14.2-linux-amd64/sing-box
+            to: sing-box
+            sha256: fc9c6e6ab345f045b16a0ed10d1ff28d68e8e56e7749fca30738d1406e98d7b8
+          - from: sing-box-1.14.2-linux-amd64/libcronet.so
+            to: libcronet.so
+            sha256: 23109c55b08829bb1a68682a61a64852b1bbf243753b153cbd8f6e4ea2c05294
+          - from: sing-box-1.14.2-linux-amd64/LICENSE
+            to: LICENSE.sing-box
+            sha256: 650d5e3b99a446fb38e820fa87a49562e0c79eab868fff58618ac487a58e554c
+      linux-arm64:
+        url: https://github.com/SagerNet/sing-box/releases/download/v1.14.2/sing-box-1.14.2-linux-arm64.tar.gz
+        sha256: b43a1fb1bda131c6653576741ce527eb2bdeab7c9308ca90ee8b972abb7e4a7f
+        files:
+          - from: sing-box-1.14.2-linux-arm64/sing-box
+            to: sing-box
+            sha256: b8610f45abb7e967e195264383f5cbd20fba7821a3c37e3a8c4c5ab6cad28eac
+          - from: sing-box-1.14.2-linux-arm64/libcronet.so
+            to: libcronet.so
+            sha256: 3c1fcfcb56261a4b318ffb6d2227b9726782edb5a894e74db2b534406db62498
+          - from: sing-box-1.14.2-linux-arm64/LICENSE
+            to: LICENSE.sing-box
+            sha256: 650d5e3b99a446fb38e820fa87a49562e0c79eab868fff58618ac487a58e554c
+
+  # zapret2: winws2 (Windows, WinDivert) and nfqws2 (Linux, NFQUEUE). Strategies are Lua:
+  # the engine loads lua/zapret-lib.lua + lua/zapret-antidpi.lua (+ zapret-auto.lua for
+  # orchestrators) via --lua-init. One archive holds every platform; files/fake blobs and
+  # the helper tools (mdig, ip2net, killall) are not used.
+  - name: zapret2
+    version: "1.0.5.2"
+    license: MIT
+    source: https://github.com/bol-van/zapret2/releases/tag/v1.0.5.2
+    platforms:
+      windows-amd64:
+        url: https://github.com/bol-van/zapret2/releases/download/v1.0.5.2/zapret2-v1.0.5.2.zip
+        sha256: f585590bea6da82ac2c74926f6ac17e6204ee8b53e455c2ba2edae0c58c5d4ac
+        files:
+          - { from: zapret2-v1.0.5.2/binaries/windows-x86_64/winws2.exe,      to: winws2.exe,          sha256: eb9807972c15f05a00416b0549d766a71c9186f8101d406e3cc6c16278164d9e }
+          - { from: zapret2-v1.0.5.2/binaries/windows-x86_64/WinDivert.dll,   to: WinDivert.dll,       sha256: 16abd6a029e65557c6a309bea7b13bf81fff4e193567582e1cddbf6719f323e0 }
+          - { from: zapret2-v1.0.5.2/binaries/windows-x86_64/WinDivert64.sys, to: WinDivert64.sys,     sha256: 8da085332782708d8767bcace5327a6ec7283c17cfb85e40b03cd2323a90ddc2 }
+          - { from: zapret2-v1.0.5.2/binaries/windows-x86_64/cygwin1.dll,     to: cygwin1.dll,         sha256: 103104a52e5293ce418944725df19e2bf81ad9269b9a120d71d39028e821499b }
+          - { from: zapret2-v1.0.5.2/lua/zapret-lib.lua,                      to: lua/zapret-lib.lua,     sha256: b67a470f23b00a8d6e732c4e5135a39b224511e0b71809d5f4616adf62674980 }
+          - { from: zapret2-v1.0.5.2/lua/zapret-antidpi.lua,                  to: lua/zapret-antidpi.lua, sha256: 31c9dd75b0bd55e98e5306293f2be81e9d2ecadcbbf9157394ff37dcff7dc85a }
+          - { from: zapret2-v1.0.5.2/lua/zapret-auto.lua,                     to: lua/zapret-auto.lua,    sha256: c2028f544134b0dec33f054ac54fe4f2315d969ba034601456f72017fd5f8528 }
+          - { from: zapret2-v1.0.5.2/docs/LICENSE.txt,                        to: LICENSE.zapret2,     sha256: d089978dd77d53cb6aa5dff51cfdbff617e52dd44af1ac44a6df02c6644f17d5 }
+      linux-amd64:
+        url: https://github.com/bol-van/zapret2/releases/download/v1.0.5.2/zapret2-v1.0.5.2.zip
+        sha256: f585590bea6da82ac2c74926f6ac17e6204ee8b53e455c2ba2edae0c58c5d4ac
+        files:
+          - { from: zapret2-v1.0.5.2/binaries/linux-x86_64/nfqws2,            to: nfqws2,              sha256: de1414b1e0f9a5659d438cddcb0c7e9099b4533bf5c8a3cf841c7bc7e5aa1473 }
+          - { from: zapret2-v1.0.5.2/lua/zapret-lib.lua,                      to: lua/zapret-lib.lua,     sha256: b67a470f23b00a8d6e732c4e5135a39b224511e0b71809d5f4616adf62674980 }
+          - { from: zapret2-v1.0.5.2/lua/zapret-antidpi.lua,                  to: lua/zapret-antidpi.lua, sha256: 31c9dd75b0bd55e98e5306293f2be81e9d2ecadcbbf9157394ff37dcff7dc85a }
+          - { from: zapret2-v1.0.5.2/lua/zapret-auto.lua,                     to: lua/zapret-auto.lua,    sha256: c2028f544134b0dec33f054ac54fe4f2315d969ba034601456f72017fd5f8528 }
+          - { from: zapret2-v1.0.5.2/docs/LICENSE.txt,                        to: LICENSE.zapret2,     sha256: d089978dd77d53cb6aa5dff51cfdbff617e52dd44af1ac44a6df02c6644f17d5 }
+      linux-arm64:
+        url: https://github.com/bol-van/zapret2/releases/download/v1.0.5.2/zapret2-v1.0.5.2.zip
+        sha256: f585590bea6da82ac2c74926f6ac17e6204ee8b53e455c2ba2edae0c58c5d4ac
+        files:
+          - { from: zapret2-v1.0.5.2/binaries/linux-arm64/nfqws2,             to: nfqws2,              sha256: 8788877cd4b3140357dd10524832ca508d47055efae072bc426b887bfea253a7 }
+          - { from: zapret2-v1.0.5.2/lua/zapret-lib.lua,                      to: lua/zapret-lib.lua,     sha256: b67a470f23b00a8d6e732c4e5135a39b224511e0b71809d5f4616adf62674980 }
+          - { from: zapret2-v1.0.5.2/lua/zapret-antidpi.lua,                  to: lua/zapret-antidpi.lua, sha256: 31c9dd75b0bd55e98e5306293f2be81e9d2ecadcbbf9157394ff37dcff7dc85a }
+          - { from: zapret2-v1.0.5.2/lua/zapret-auto.lua,                     to: lua/zapret-auto.lua,    sha256: c2028f544134b0dec33f054ac54fe4f2315d969ba034601456f72017fd5f8528 }
+          - { from: zapret2-v1.0.5.2/docs/LICENSE.txt,                        to: LICENSE.zapret2,     sha256: d089978dd77d53cb6aa5dff51cfdbff617e52dd44af1ac44a6df02c6644f17d5 }
