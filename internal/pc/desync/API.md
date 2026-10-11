@@ -10,7 +10,7 @@
 | Children | internal/pc/desync/winws, internal/pc/desync/nfqws |
 | Uses libs | internal/lib/route, internal/lib/netif |
 | Build tags | – |
-| Status | planned |
+| Status | implemented |
 
 ## Responsibility
 
@@ -61,13 +61,17 @@ func Build(cfg Config, uplink netif.Interface, t route.Table) (Plan, error)
 - Uplink-only: winws gets a WinDivert filter limited to the uplink interface index; nfqws gets nftables rules limited to the uplink `oifname`.
 - `ExcludeIPs` must not be empty (it protects the tunnel). Missing → error.
 
+- Check order in `Build`: `ExcludeIPs` empty → `ErrNoExcludeIP` (before everything, even for an empty hostlist); unknown engine → `ErrUnsupported`; no desync domains → `Plan{Engine}` (nothing to run); virtual uplink → `ErrVirtualUplink`; then the child renders.
+- An explicit `Config.Engine` works on any OS (the renderers are pure); only the default depends on `runtime.GOOS`.
+- Exported beyond the contract: `ErrVirtualUplink`, `DefaultEngine()`, `HostlistFile`.
+
 ## Config
 
 See above.
 
 ## Errors
 
-`ErrNoExcludeIP`, `ErrUnsupported` (engine not available on this OS).
+`ErrNoExcludeIP`, `ErrUnsupported` (engine not available on this OS), `ErrVirtualUplink`.
 
 ## Testing
 
@@ -79,4 +83,4 @@ Choosing strategies (future strategy finder), running processes.
 
 ## Bootstrap (M0)
 
-`doc.go` only.
+`doc.go` only. (Implemented in M6.)

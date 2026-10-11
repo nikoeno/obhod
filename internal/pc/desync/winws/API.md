@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | – |
 | Build tags | – |
-| Status | planned |
+| Status | implemented |
 | Pinned | zapret2 1.0.5.2 (`third_party/manifest.yaml`) |
 
 ## Responsibility
@@ -51,6 +51,13 @@ func Render(in Input) (Output, error)
 - Flag names and the WinDivert filter syntax must be verified against the **pinned zapret2 version** (1.0.5.2).
 - Deterministic output.
 
+- WinDivert has no CIDR syntax: each exclude prefix becomes an address range (`ip.DstAddr >= a and ip.DstAddr <= b`; a host prefix becomes `==`). `not (...)` on one address family lets the other family through. The raw filter does not repeat `outbound`, `tcp` or the ports; winws2 ANDs it with `--wf-tcp-out`.
+- `Ports` default to 80 and 443 and are rendered sorted (`--wf-tcp-out=80,443`). The hostlist is sorted and deduplicated, `
+` endings. `LuaInit` names must be plain file names.
+- `LuaDir` is joined with `/` (`@<LuaDir>/<file>`); a trailing separator is trimmed.
+- All emitted flag names exist in the pinned `winws2.exe`. `winws2.exe` asks for elevation even for `--help`, so the integration test (`-tags integration`, Windows) checks the binary's strings instead of running it. Semantics of the flags were not exercised here.
+- Exported beyond the contract: `Filter(ifIndex, excludeIPs, excludePorts)` (the filter builder, for tests and debugging), `ErrInvalid`, `HostlistName`.
+
 ## Config
 
 None.
@@ -69,4 +76,4 @@ Starting winws, admin rights.
 
 ## Bootstrap (M0)
 
-`doc.go` only.
+`doc.go` only. (Implemented in M4.)

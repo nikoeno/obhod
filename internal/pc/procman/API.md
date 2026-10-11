@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | internal/lib/proc, internal/lib/clock |
 | Build tags | – |
-| Status | planned |
+| Status | implemented |
 
 ## Responsibility
 
@@ -62,6 +62,7 @@ type Config struct {
     MaxRestarts    int           // per window; default 5
     RestartWindow  time.Duration // default 10m
     LogLines       int           // ring buffer per process; default 200
+    BinDir         string        // directory of our binaries; CleanupStale kills only processes below it
 }
 
 type Manager struct{ /* ... */ }
@@ -87,6 +88,14 @@ func (m *Manager) CleanupStale(ctx context.Context, names ...string) error
 - The manager never elevates privileges. If a child fails because admin is needed, it returns `ErrNeedsAdmin` with guidance.
 - stdout/stderr go to a ring buffer and the app log. They are never parsed for decisions.
 
+- `Start` polls `Ready` every 100 ms (clock) until it succeeds, the process exits, or ctx ends; the caller's ctx is the readiness timeout. A failed probe stops the process.
+- Restart backoff on unexpected exit: 1 s, 2 s, 4 s ... capped at 30 s; after `MaxRestarts` exits inside `RestartWindow` the state becomes `failed`. A restarted process is not re-probed.
+- `Spec.Env` entries are added to the manager's own environment. `Restart` keeps the process's place in the stop order.
+- `CleanupStale` refuses to run without `Config.BinDir`, skips processes whose path is unreadable, and never kills the current process.
+- Windows has no graceful stop for a child without a console: `Stop` terminates it at once. Linux sends SIGTERM to the process group, then SIGKILL after `StopTimeout`.
+- Output goes only to the ring buffer (`Logs`); the app decides what to do with it.
+- Linux tests (`TestStopTimeoutKills`, Pdeathsig) are written but were only compile-checked on the Windows development machine.
+
 ## Config
 
 See above.
@@ -105,4 +114,4 @@ Knowing what the processes are. Service installation.
 
 ## Bootstrap (M0)
 
-`doc.go` only.
+`doc.go` only. (Implemented in M3.)

@@ -1,0 +1,127 @@
+paths:
+    root: /srv/splitter
+secrets:
+    tunnel: vps.json
+    proxy: corp-proxy.json
+analyzer:
+    concurrency: 4
+    per_ip_concurrency: 1
+    jitter:
+        - 100ms
+        - 500ms
+    options:
+        stages: tcp,tls,http,bulk
+        fingerprint: chrome
+        timeouts:
+            resolve: 5s
+            tcp: 5s
+            tls: 6s
+            http: 8s
+            bulk: 10s
+        bulk:
+            mode: download
+            size: 65536
+            stall_min: 12288
+            stall_max: 36864
+        sni_swap: true
+        repeats: 2
+    doh:
+        - https://9.9.9.9/dns-query
+    control_domains:
+        - www.cloudflare.com
+        - www.wikipedia.org
+    canary_domains:
+        - www.instagram.com
+        - rutracker.org
+    bypass_processes:
+        - winws
+        - nfqws
+        - goodbyedpi
+        - ciadpi
+        - byedpi
+        - sing-box
+        - xray
+        - v2ray
+        - mihomo
+        - clash
+        - zapret
+    neutral_sni:
+        - www.microsoft.com
+        - www.apple.com
+    public_ip_endpoint: ""
+checker:
+    lists:
+        candidates:
+            - testdata/lists/candidates.txt
+        proxy:
+            - testdata/lists/proxy.txt
+        block:
+            - testdata/lists/block.txt
+    schedule:
+        interval: 2h0m0s
+        jitter: 0s
+        mingap: 0s
+        failthreshold: 4
+        failwindow: 0s
+    decide:
+        confirmations: 0
+        ttl: 0s
+        order: []
+    store:
+        file: ""
+        flushinterval: 0s
+    netwatch:
+        debounce: 0s
+        refresh: 0s
+        includegateway: false
+        echoendpoints: []
+        salt: ""
+    unknowndefault: tunnel
+    retention: 0s
+singbox:
+    binary: /opt/sing-box
+    tun:
+        name: splitter0
+        address: 198.19.0.1/30
+        stack: gvisor
+    dns:
+        direct_doh: https://9.9.9.9/dns-query
+        fake_ip_range: 198.18.0.0/16
+    clash_api: 127.0.0.1:9191
+    own_processes:
+        - myvpn.exe
+    block_quic: false
+    log_level: warn
+desync:
+    engine: winws2
+    binary: /opt/winws2
+    strategy:
+        - --filter-l7=tls
+        - --lua-desync=fake
+    lua_init:
+        - zapret-lib.lua
+    exclude_ips:
+        - 203.0.113.7/32
+        - 2001:db8::/32
+    exclude_ports:
+        - - 50000
+          - 50099
+    ports:
+        - 443
+procman:
+    max_restarts: 3
+    restart_window: 5m0s
+    log_lines: 50
+monitor:
+    poll_interval: 5s
+    stall_min_bytes: 0
+    stall_max_bytes: 0
+    stall_min_age: 15s
+status:
+    listen: 127.0.0.1:9100
+    token: abc
+log:
+    level: debug
+    file: app.log
+    max_size_mb: 5
+    max_files: 2

@@ -1,0 +1,7 @@
+--qnum=200
+--lua-init=@/opt/splitter/lua/zapret-lib.lua
+--lua-init=@/opt/splitter/lua/zapret-antidpi.lua
+--hostlist=hostlist.txt
+--filter-l7=tls
+--payload=tls_client_hello
+--lua-desync=fake:blob=fake_default_tls:tcp_md5

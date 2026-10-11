@@ -1,0 +1,9 @@
+--wf-tcp-out=80,443
+--wf-raw-filter=ifIdx == 12 and not (ip.DstAddr == 203.0.113.7) and not (ipv6.DstAddr == 2001:db8::7) and not ((tcp.SrcPort >= 50000 and tcp.SrcPort <= 50099))
+--lua-init=@C:/app/third_party/lua/zapret-lib.lua
+--lua-init=@C:/app/third_party/lua/zapret-antidpi.lua
+--hostlist=hostlist.txt
+--filter-l7=tls
+--payload=tls_client_hello
+--out-range=-d10
+--lua-desync=fake:blob=fake_default_tls:tcp_md5

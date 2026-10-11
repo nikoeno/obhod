@@ -1,0 +1,10 @@
+--wf-tcp-out=443,8443
+--wf-raw-filter=ifIdx == 12
+--lua-init=@C:/app/third_party/lua/zapret-lib.lua
+--lua-init=@C:/app/third_party/lua/zapret-antidpi.lua
+--lua-init=@C:/app/third_party/lua/zapret-auto.lua
+--hostlist=hostlist.txt
+--filter-l7=tls
+--payload=tls_client_hello
+--out-range=-d10
+--lua-desync=fake:blob=fake_default_tls:tcp_md5

@@ -1,0 +1,116 @@
+paths:
+    root: ""
+secrets:
+    tunnel: tunnel.json
+    proxy: ""
+analyzer:
+    concurrency: 8
+    per_ip_concurrency: 1
+    jitter:
+        - 100ms
+        - 500ms
+    options:
+        stages: tcp,tls,http,bulk
+        fingerprint: chrome
+        timeouts:
+            resolve: 5s
+            tcp: 5s
+            tls: 6s
+            http: 8s
+            bulk: 10s
+        bulk:
+            mode: download
+            size: 65536
+            stall_min: 12288
+            stall_max: 36864
+        sni_swap: true
+        repeats: 2
+    doh:
+        - https://1.1.1.1/dns-query
+        - https://8.8.8.8/dns-query
+    control_domains:
+        - www.cloudflare.com
+        - www.wikipedia.org
+    canary_domains:
+        - www.instagram.com
+        - rutracker.org
+    bypass_processes:
+        - winws
+        - nfqws
+        - goodbyedpi
+        - ciadpi
+        - byedpi
+        - sing-box
+        - xray
+        - v2ray
+        - mihomo
+        - clash
+        - zapret
+    neutral_sni:
+        - www.microsoft.com
+        - www.apple.com
+    public_ip_endpoint: ""
+checker:
+    lists:
+        candidates: []
+        proxy: []
+        block: []
+    schedule:
+        interval: 0s
+        jitter: 0s
+        mingap: 0s
+        failthreshold: 0
+        failwindow: 0s
+    decide:
+        confirmations: 0
+        ttl: 0s
+        order: []
+    store:
+        file: ""
+        flushinterval: 0s
+    netwatch:
+        debounce: 0s
+        refresh: 0s
+        includegateway: false
+        echoendpoints: []
+        salt: ""
+    unknowndefault: ""
+    retention: 0s
+singbox:
+    binary: ""
+    tun:
+        name: ""
+        address: ""
+        stack: ""
+    dns:
+        direct_doh: https://1.1.1.1/dns-query
+        fake_ip_range: ""
+    clash_api: ""
+    own_processes: []
+    block_quic: true
+    log_level: ""
+desync:
+    engine: ""
+    binary: ""
+    strategy: []
+    lua_init: []
+    exclude_ips: []
+    exclude_ports: []
+    ports: []
+procman:
+    max_restarts: 0
+    restart_window: 0s
+    log_lines: 0
+monitor:
+    poll_interval: 0s
+    stall_min_bytes: 0
+    stall_max_bytes: 0
+    stall_min_age: 0s
+status:
+    listen: ""
+    token: ""
+log:
+    level: info
+    file: splitter.log
+    max_size_mb: 10
+    max_files: 3

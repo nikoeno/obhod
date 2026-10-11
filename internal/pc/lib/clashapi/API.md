@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | – |
 | Build tags | – |
-| Status | planned |
+| Status | implemented |
 
 ## Responsibility
 
@@ -68,10 +68,16 @@ HTTP errors wrap status and endpoint.
 
 `httptest` with recorded JSON fixtures.
 
+## Notes
+
+- `New` with a nil `*http.Client` uses a 5 s timeout and no proxy. `Snapshot.At` is the local receive time.
+- `NewFake` also answers `Version` with `clashapi.FakeVersion`.
+- Fixtures in `testdata/` follow the Clash wire format of sing-box 1.14.2 (hand-written; re-record against the pinned binary when convenient).
+
 ## Out of scope
 
 Modifying sing-box state via the API.
 
 ## Bootstrap (M0)
 
-`doc.go` only.
+`doc.go` only. (Implemented in M2.)

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>splitter status</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<header>
+  <h1>splitter</h1>
+  <span id="version" class="muted"></span>
+</header>
+<main>
+  <section>
+    <h2>Network</h2>
+    <p id="network">-</p>
+    <p class="muted">Last check: <span id="last-check">-</span> · next: <span id="next-check">-</span></p>
+  </section>
+  <section>
+    <h2>Savings</h2>
+    <p><span id="savings" class="big">-</span> of traffic stays off the tunnel</p>
+  </section>
+  <section>
+    <h2>Routes</h2>
+    <table id="routes"><thead><tr><th>Route</th><th>Domains</th><th>Traffic</th></tr></thead><tbody></tbody></table>
+  </section>
+  <section>
+    <h2>Processes</h2>
+    <table id="processes"><thead><tr><th>Name</th><th>State</th><th>Restarts</th></tr></thead><tbody></tbody></table>
+  </section>
+  <section>
+    <h2>Warnings</h2>
+    <ul id="warnings"></ul>
+  </section>
+  <section>
+    <h2>Recent route changes</h2>
+    <table id="recent"><thead><tr><th>When</th><th>Domain</th><th>From</th><th>To</th></tr></thead><tbody></tbody></table>
+  </section>
+  <p id="error" class="error" hidden>The status service is not reachable.</p>
+</main>
+<script src="/assets/app.js"></script>
+</body>
+</html>

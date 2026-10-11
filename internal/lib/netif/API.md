@@ -6,7 +6,7 @@
 | Kind | lib |
 | Binary | – |
 | Purpose | finds the physical uplink interface and binds sockets to it, bypassing TUN adapters |
-| Consumers | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc/desync |
+| Consumers | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc, internal/pc/desync |
 | Children | – |
 | Uses libs | internal/lib/clock |
 | Build tags | – |

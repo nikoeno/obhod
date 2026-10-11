@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | – |
 | Build tags | – |
-| Status | planned |
+| Status | implemented |
 | Pinned | zapret2 1.0.5.2 (`third_party/manifest.yaml`) |
 
 ## Responsibility
@@ -55,6 +55,12 @@ func Render(in Input) (Output, error)
 - Args: `--qnum=QueueNum`, one `--lua-init=@<LuaDir>/<file>` per `LuaInit`, `--hostlist=hostlist.txt`, then `Strategy`.
 - Flags must be verified against the **pinned zapret2 version** (1.0.5.2).
 
+- Rules are emitted as `nft '<statement>'` lines so that braces and semicolons survive a shell. Excluded destination addresses and source ports are early `return` rules in the postrouting chain, before the queue rule: a match such as `ip daddr != X` inside the queue rule would exclude every IPv6 packet from queuing.
+- `Mark` 0 means the default `0x40000000`; `--fwmark=` is passed only for a non-default mark (flag name from the zapret2 README, not verified: the packed `nfqws2` binary shows no strings). `QueueNum` 0 means 200. `Ports` default to 80 and 443 (sorted).
+- `Uplink` must match `[A-Za-z0-9_.:@+-]{1,15}`; anything else is an error (it ends up inside an nft string).
+- Exported beyond the contract: `ErrInvalid`, `HostlistName`, `DefaultMark`, `DefaultQueueNum`.
+- The commands were not run against a real kernel; the lab (Level 3) owns that test.
+
 ## Config
 
 None.
@@ -73,4 +79,4 @@ Applying nft rules (a human does it or the lab does it in a namespace).
 
 ## Bootstrap (M0)
 
-`doc.go` only.
+`doc.go` only. (Implemented in M5.)
