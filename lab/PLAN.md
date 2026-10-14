@@ -1,6 +1,6 @@
 # Implementation plan — lab (end-to-end tests)
 
-Status: approved (2026-10-11); L0 done. Decided: the lab runs by hand under WSL2 on the developer's Windows machine, as a smoke test before each release (not in CI). `lab/API.md` and its children are `planned` with `doc.go` only. Nothing below is started. The contract changes in §2 are approved and written into the `API.md` files. Each module's `API.md` stays the source of truth; this file orders the work and lists the open decisions. Delete it (or fold the leftovers into `DESIGN.md`) when L10 is done.
+Status: done (2026-10-14). L0-L10 implemented and verified as root in WSL2 (`make e2e`: 76 scenarios pass). Open items that are not lab work: task card 07 (flaky checker test), IPv6 for the `ip rule` exemption, a public `analyzer.ErrNoUplink`. Each module's `API.md` stays the source of truth; this file records how the lab was built and what it found.
 
 ## 0. Goal
 
@@ -148,7 +148,7 @@ Results recorded from the real-kernel run: a stall rule added while connected mo
 - A second `splitter` exits with code 3 (instance lock).
 - Run the Linux-only unit tests that were only compile-checked (`procman` SIGTERM/Pdeathsig, `netif` sysfs, the `flock` lock) in the same job.
 
-### L10 — runbook and report
+### L10 — runbook and report (done 2026-10-14; `make e2e` and `make lab-clean` verified as root in WSL2: 76 passed, 0 failed, root namespace unchanged)
 - `make e2e` (in WSL2): checks it runs on Linux, then `sudo -E env "PATH=$PATH" LAB_BIN_DIR=$PWD/bin go test -tags lab -v -timeout 60m ./lab/...`. `make lab-clean` removes leftover namespaces and `/etc/netns/obl*` of a crashed run.
 - The lab writes `dist/e2e/<version>-<date>/report.md` and keeps every process log there (also on success, so a release has evidence). `dist/` is git-ignored already or is added to `.gitignore`.
 - `docs/RELEASE.md` (new): the pre-release checklist: one-time WSL2 setup (distro packages, Go, kernel check through `make e2e`'s preflight), then `make build` → `make fetch` → `make e2e` in WSL2 → `internal/pc/SMOKE.md` "Windows" on the host → attach the report. It links `docs/RECOVERY.md`.

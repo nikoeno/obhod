@@ -90,15 +90,47 @@ Nothing from the first command should be listed.
 
 ## Linux
 
+All commands in this section are for you to run as root (`sudo`), one at a time. Look first, delete only what is ours. After `kill -9` or a crash of `splitter run` the lab recorded (`kill9-leftovers.txt`) that the policy rules, the nft table and files in `run/` stay. The children (`sing-box`, `nfqws2`) die with the app and the TUN device goes with sing-box, but check.
+
+1. Stale children: list them, kill by PID.
+
 ```bash
-sudo pkill -9 splitter sing-box nfqws2
-sudo nft delete table inet splitter
-ip route
-ip link
+pgrep -a 'splitter|sing-box|nfqws2'
+sudo kill -9 <pid> [<pid> ...]
 ```
 
-Only the `inet splitter` table is ours. Never run `nft flush ruleset`.
-If the interface `splitter` is still listed by `ip link`: `sudo ip link delete splitter`.
+2. Policy rules. Look first with `ip rule show`. Ours are the exemption for the desync engine's mark (priority 8999) and sing-box's rules (priorities 9000-9003, table 2022, plus a `nop` at 9010). A clean exit removes them; a hard kill may leave them:
+
+```bash
+ip rule show
+sudo ip rule del fwmark 0x40000000/0x40000000 lookup main priority 8999
+sudo ip rule del priority 9000
+sudo ip rule del priority 9001
+sudo ip rule del priority 9002     # two rules have this priority: run it twice
+sudo ip rule del priority 9003     # three rules: run it until `ip rule show` lists none
+sudo ip rule del priority 9010     # only if listed
+sudo ip route flush table 2022
+ip rule show
+```
+
+Rules at priority 0, 32766 and 32767 belong to the system. Never delete them.
+
+3. The nft table. Only `inet splitter` is ours. Never run `nft flush ruleset`.
+
+```bash
+sudo nft list table inet splitter
+sudo nft delete table inet splitter
+```
+
+4. The TUN device, if `ip -br link` still lists it (default name `splitter`):
+
+```bash
+sudo ip link del splitter
+```
+
+5. Files: in the `run` directory (`paths.root` from `app.yaml`) `splitter.lock`, `hostlist.txt` and `sing-box.json` may remain. The app recreates them; delete them for a clean start. Do not delete `secrets/`.
+
+6. Check: `ip rule show`, `ip route show table all`, `sudo nft list ruleset`, `ip -br link`. None of the above should be left, and the internet should work.
 
 ## Notes
 

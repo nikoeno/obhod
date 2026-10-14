@@ -23,8 +23,10 @@ Automated part (no admin rights): `go test -tags integration ./internal/pc/...` 
 
 ## Linux (root)
 
-1. `splitter run`: if the `inet splitter` table is missing it exits with code 2 and prints the `nft` commands. Apply them as printed, run again.
-2. `nft list table inet splitter` shows the queue rule for the uplink; `ps` shows `nfqws2` and `sing-box`.
-3. Kill `splitter` with `kill -9`: both children must die (Pdeathsig).
-4. Remove the rules with the printed teardown command (`nft delete table inet splitter`); nothing else in `nft list ruleset` changed.
-5. Run `go test ./internal/pc/procman` as a normal user: the Linux-only tests (`TestStopTimeoutKills`, kill-on-parent-exit) have only been compile-checked on Windows so far.
+The lab (`make e2e`, see [docs/RELEASE.md](../../docs/RELEASE.md)) covers what used to be manual here: the missing `inet splitter` table and its printed commands, the queue rule, the reload after applying it, both children dying on `kill -9` without orphans, the leftovers ([docs/RECOVERY.md](../../docs/RECOVERY.md)) and the teardown. See the `TestRouting` and `TestLifecycle` scenarios in the report; do not repeat them by hand.
+
+What the lab cannot cover, on a real Linux host (not a namespace):
+
+1. `splitter run` on the real uplink: apply the printed `nft` commands (they name the real interface), run again, open a few real sites direct, through the desync engine and through the tunnel.
+2. The cleanup commands of the Linux section of `docs/RECOVERY.md` work on the host after a `kill -9`; nothing else in `nft list ruleset` changed.
+3. Run `go test ./internal/pc/procman` as a normal user: the Linux-only tests (`TestStopTimeoutKills`, kill-on-parent-exit) have only been compile-checked on Windows so far.

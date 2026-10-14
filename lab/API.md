@@ -10,7 +10,7 @@
 | Children | lab/netns, lab/fakedpi, lab/fakeasn, lab/fakedns |
 | Uses libs | internal/lib/faultserver, internal/lib/testca, internal/lib/route, internal/lib/analyzer (scenarios: `DecodeReport` of blockanalyzer's JSON report) |
 | Build tags | linux (harness and scenarios also `lab`); the address plan, the VPS config renderer, the splitter config and store writers, the nft Setup parser and the Clash wire parser (`addrs.go`, `vps.go`, `splitterconf.go`, `nftsetup.go`, `clashwire.go`) have no tag so their unit tests run on any OS |
-| Status | in progress: harness, checker, blockanalyzer, routing and lifecycle scenarios done (L5-L9, 76 scenarios pass as root in WSL); runbook and release report L10 open (plan: PLAN.md) |
+| Status | implemented (L0-L10; `make e2e` passes 76 scenarios as root in WSL2; plan: PLAN.md) |
 
 ## Responsibility
 

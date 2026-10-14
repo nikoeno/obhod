@@ -84,7 +84,7 @@ The architecture rules (module shape, placement, import rules a-e, API.md header
 | `internal/pc/status` | child | internal/pc | – | implemented |
 | `internal/router` | app | cmd/splitter-router | internal/router/podkop | planned |
 | `internal/router/podkop` | child | internal/router | – | planned |
-| `lab` | lab | – (go test only) | lab/netns, lab/fakedpi, lab/fakeasn, lab/fakedns | in progress: harness and scenarios L5–L9 done; runbook L10 open (lab/PLAN.md) |
+| `lab` | lab | – (go test only) | lab/netns, lab/fakedpi, lab/fakeasn, lab/fakedns | implemented (lab/PLAN.md) |
 | `lab/fakeasn` | lab | lab | – | implemented (lab L3) |
 | `lab/fakedns` | lab | lab | – | implemented (lab L3) |
 | `lab/fakedpi` | lab | lab | – | implemented (lab L4a, L4b) |
