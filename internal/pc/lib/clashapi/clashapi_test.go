@@ -133,10 +133,13 @@ func TestMalformedBody(t *testing.T) {
 }
 
 func TestBadStart(t *testing.T) {
-	srv, _ := serve(t, 200, []byte(`{"connections":[{"id":"a","start":"yesterday"}]}`))
-	_, err := New(srv.URL, "", nil).Connections(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "bad start") {
-		t.Fatalf("err = %v", err)
+	srv, _ := serve(t, 200, []byte(`{"connections":[{"id":"a","start":"yesterday"},{"id":"b","start":"2026-10-01T09:00:00Z"}]}`))
+	snap, err := New(srv.URL, "", nil).Connections(context.Background())
+	if err != nil {
+		t.Fatalf("one bad start failed the snapshot: %v", err)
+	}
+	if len(snap.Connections) != 2 || !snap.Connections[0].Start.IsZero() || snap.Connections[1].Start.IsZero() {
+		t.Fatalf("connections = %+v", snap.Connections)
 	}
 }
 

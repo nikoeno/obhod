@@ -62,11 +62,16 @@ type fakeProcs struct {
 	running  map[string]procman.Spec
 	started  map[string]bool
 	startErr map[string]error
-	events   chan procman.Event
+	// restartErr fails the next Restart calls of a name, in order.
+	restartErr map[string][]error
+	logs       map[string][]string
+	events     chan procman.Event
+	onStart    func(name string) // called inside Start, with the fake locked
 }
 
 func newFakeProcs(l *opLog) *fakeProcs {
-	return &fakeProcs{log: l, running: map[string]procman.Spec{}, started: map[string]bool{}, startErr: map[string]error{}, events: make(chan procman.Event, 8)}
+	return &fakeProcs{log: l, running: map[string]procman.Spec{}, started: map[string]bool{}, startErr: map[string]error{},
+		restartErr: map[string][]error{}, logs: map[string][]string{}, events: make(chan procman.Event, 8)}
 }
 
 func (f *fakeProcs) Start(_ context.Context, s procman.Spec) error {
@@ -78,6 +83,9 @@ func (f *fakeProcs) Start(_ context.Context, s procman.Spec) error {
 	}
 	f.running[s.Name], f.started[s.Name] = s, true
 	f.log.add("start " + s.Name)
+	if f.onStart != nil {
+		f.onStart(s.Name)
+	}
 	return nil
 }
 func (f *fakeProcs) Stop(_ context.Context, name string) error {
@@ -95,6 +103,14 @@ func (f *fakeProcs) Stop(_ context.Context, name string) error {
 func (f *fakeProcs) Restart(_ context.Context, name string, s procman.Spec) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if errs := f.restartErr[name]; len(errs) > 0 {
+		f.restartErr[name] = errs[1:]
+		if errs[0] != nil {
+			delete(f.running, name)
+			f.log.add("restart-failed " + name)
+			return errs[0]
+		}
+	}
 	f.running[name], f.started[name] = s, true
 	f.log.add("restart " + name)
 	return nil
@@ -110,6 +126,19 @@ func (f *fakeProcs) Status() []procman.ProcStatus {
 	return out
 }
 func (f *fakeProcs) Events() <-chan procman.Event { return f.events }
+func (f *fakeProcs) Logs(name string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.logs[name]
+}
+
+// crash makes a running process disappear the way procman reports a give-up.
+func (f *fakeProcs) crash(name string) {
+	f.mu.Lock()
+	delete(f.running, name)
+	f.mu.Unlock()
+	f.events <- procman.Event{Name: name, State: procman.StateFailed, Err: errors.New("gave up after 5 restarts")}
+}
 func (f *fakeProcs) CleanupStale(_ context.Context, names ...string) error {
 	f.log.add("cleanup " + strings.Join(names, ","))
 	return nil
@@ -128,6 +157,9 @@ type fakeChecker struct {
 	sub     chan route.Table
 	reports []checker.Failure
 	runs    int
+	// subscribed is set by Subscribe. Like the real checker, publish announces
+	// a table only to a subscriber that exists at that moment.
+	subscribed bool
 }
 
 func (f *fakeChecker) Run(ctx context.Context) error {
@@ -141,6 +173,9 @@ func (f *fakeChecker) Run(ctx context.Context) error {
 }
 func (f *fakeChecker) Table() route.Table { f.mu.Lock(); defer f.mu.Unlock(); return f.table }
 func (f *fakeChecker) Subscribe() (<-chan route.Table, func()) {
+	f.mu.Lock()
+	f.subscribed = true
+	f.mu.Unlock()
 	return f.sub, func() {}
 }
 func (f *fakeChecker) ReportFailure(x checker.Failure) {
@@ -156,7 +191,11 @@ func (f *fakeChecker) Status() checker.Status {
 func (f *fakeChecker) publish(t route.Table) {
 	f.mu.Lock()
 	f.table = t
+	subscribed := f.subscribed
 	f.mu.Unlock()
+	if !subscribed {
+		return
+	}
 	select {
 	case f.sub <- t:
 	default:
@@ -169,9 +208,10 @@ func (f *fakeChecker) publish(t route.Table) {
 }
 
 type fakeLoop struct {
-	log  *opLog
-	name string
-	stat monitor.Stats
+	log       *opLog
+	name      string
+	stat      monitor.Stats
+	listenErr error
 }
 
 func (f *fakeLoop) Run(ctx context.Context) error {
@@ -181,6 +221,10 @@ func (f *fakeLoop) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 func (f *fakeLoop) Stats() monitor.Stats { return f.stat }
+func (f *fakeLoop) Listen() error {
+	f.log.add(f.name + ".listen")
+	return f.listenErr
+}
 
 // harness wires an App to fakes and a temp directory.
 type harness struct {
@@ -198,6 +242,11 @@ type harness struct {
 	netEv   chan netif.Event
 	admin   bool
 	nft     bool
+	nftList string
+	ipRules string // listing of `ip rule show`
+	ipErr   error
+	lookup  func(host string) ([]netip.Addr, error)
+	status  *fakeLoop
 	check   func(file string) error
 	checks  int
 	parent  func() bool
@@ -224,12 +273,14 @@ const tunnelJSON = `{"type":"vless","server":"203.0.113.7","server_port":443,"uu
 
 func newHarness(t *testing.T, initial route.Table, opts ...Option) *harness {
 	t.Helper()
-	h := &harness{t: t, log: &opLog{}, fc: clock.NewFake(time.Unix(1_000_000, 0)), admin: true, nft: true,
+	h := &harness{t: t, log: &opLog{}, fc: clock.NewFake(time.Unix(1_000_000, 0)), admin: true, nft: true, ipRules: engineRuleListing,
 		uplink: netif.Interface{Name: "eth0", Index: 3}, netEv: make(chan netif.Event, 4)}
 	h.p = paths.FromRoot(t.TempDir())
 	h.procs = newFakeProcs(h.log)
 	h.chk = &fakeChecker{log: h.log, table: initial, sub: make(chan route.Table, 1)}
 	h.mon = &fakeLoop{log: h.log, name: "monitor"}
+	h.status = &fakeLoop{log: h.log, name: "status"}
+	h.lookup = func(string) ([]netip.Addr, error) { return nil, errors.New("no such host") }
 	h.cfg = DefaultConfig()
 	h.cfg.Desync.Engine = desync.WinWS
 	h.cfg.Desync.Strategy = []string{"--filter-l7=tls"}
@@ -249,7 +300,7 @@ func newHarness(t *testing.T, initial route.Table, opts ...Option) *harness {
 			return h.mon
 		},
 		newStatus: func(status.Config, status.Source, clashapi.Client) (statusRunner, error) {
-			return &fakeLoop{log: h.log, name: "status"}, nil
+			return h.status, nil
 		},
 		uplink:      func(context.Context) (netif.Interface, error) { h.mu.Lock(); defer h.mu.Unlock(); return h.uplink, nil },
 		watchUplink: func(context.Context) (<-chan netif.Event, error) { return h.netEv, nil },
@@ -264,8 +315,18 @@ func newHarness(t *testing.T, initial route.Table, opts ...Option) *harness {
 			}
 			return nil
 		},
-		isAdmin:  func() (bool, error) { return h.admin, nil },
-		nftTable: func(context.Context) (bool, error) { return h.nft, nil },
+		isAdmin: func() (bool, error) { return h.admin, nil },
+		nftTable: func(context.Context) (string, bool, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.nftList, h.nft, nil
+		},
+		ipRuleList: func(context.Context) (string, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.ipRules, h.ipErr
+		},
+		lookupHost: func(_ context.Context, host string) ([]netip.Addr, error) { return h.lookup(host) },
 		singCheck: func(_ context.Context, _ string, file string) error {
 			h.mu.Lock()
 			h.checks++
@@ -825,12 +886,18 @@ func TestNoExcludeAddressIsConfigError(t *testing.T) {
 	if exitCode(err) != exitConfig || !strings.Contains(err.Error(), "exclude_ips") {
 		t.Fatalf("err = %v, code %d", err, exitCode(err))
 	}
-	// A configured exclude makes the same tunnel acceptable.
+	// An unrelated configured exclude does not protect a host-name tunnel
+	// that did not resolve.
 	h = newHarness(t, baseTable(t))
 	h.app.outbounds.Tunnel = json.RawMessage(`{"type":"vless","server":"vpn.example.org","server_port":443}`)
 	h.app.cfg.Desync.ExcludeIPs = []netip.Prefix{netip.MustParsePrefix("198.51.100.5/32")}
-	h.start()
-	h.waitOp("status.start")
+	err = h.app.Run(context.Background())
+	if exitCode(err) != exitConfig || !strings.Contains(err.Error(), "could not be resolved") {
+		t.Fatalf("unresolved host-name tunnel: err = %v, code %d", err, exitCode(err))
+	}
+	if h.log.index("start winws2") >= 0 || h.log.index("start sing-box") >= 0 {
+		t.Fatalf("started without protecting the tunnel: %s", h.ops())
+	}
 }
 
 func TestStatusSourceSnapshot(t *testing.T) {

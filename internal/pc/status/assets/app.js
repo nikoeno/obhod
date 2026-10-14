@@ -32,6 +32,7 @@ function fill(tbody, rows) {
 
 function render(s) {
   $("version").textContent = s.Version || "";
+  $("state").textContent = s.State || "unknown";
   $("network").textContent = s.Network || "unknown network";
   $("last-check").textContent = when(s.LastCheck);
   $("next-check").textContent = when(s.NextCheck);

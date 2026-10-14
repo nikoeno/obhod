@@ -13,9 +13,10 @@ type rotator struct {
 	max  int64
 	keep int
 
-	mu   sync.Mutex
-	f    *os.File
-	size int64
+	mu     sync.Mutex
+	f      *os.File
+	size   int64
+	closed bool
 }
 
 func newRotator(path string, maxBytes int64, keep int) (*rotator, error) {
@@ -43,8 +44,15 @@ func (r *rotator) open() error {
 func (r *rotator) Write(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.f == nil {
+	if r.closed {
 		return 0, os.ErrClosed
+	}
+	if r.f == nil {
+		// A reopen after a rotation failed (file locked by a virus scanner,
+		// for example); try again instead of losing the log for good.
+		if err := r.open(); err != nil {
+			return 0, err
+		}
 	}
 	if r.size > 0 && r.size+int64(len(p)) > r.max {
 		if err := r.rotate(); err != nil {
@@ -74,6 +82,7 @@ func (r *rotator) rotate() error {
 func (r *rotator) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.closed = true
 	if r.f == nil {
 		return nil
 	}

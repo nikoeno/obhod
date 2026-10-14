@@ -49,6 +49,10 @@ type Network struct {
 
 func New(cfg Config, deps Deps) (*Checker, error)
 
+// Validate reports the config errors New would report (UnknownDefault,
+// Decide.Order, Retention) without loading lists or opening the store.
+func (cfg Config) Validate() error
+
 // Run blocks until ctx is done: watches the network, schedules checks, updates decisions.
 func (c *Checker) Run(ctx context.Context) error
 

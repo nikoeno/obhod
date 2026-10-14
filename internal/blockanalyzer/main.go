@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -26,6 +27,10 @@ const (
 	exitCalibration = 2 // calibration failed: the network is down
 )
 
+// errNoUplink marks a dialer setup failure caused by a missing physical uplink (the network is down).
+// The root cause is netif.ErrNoUplink, which this module may not import, so realApp wraps it.
+var errNoUplink = errors.New("no physical uplink")
+
 // app holds what tests replace: the runner and the dialer.
 type app struct {
 	newRunner func(cfg analyzer.Config, deps analyzer.Deps) (analyzer.Runner, error)
@@ -36,7 +41,12 @@ func realApp() app {
 	return app{
 		newRunner: analyzer.NewRunner,
 		newDialer: func() (analyzer.Dialer, error) {
-			return analyzer.NewDirectDialer(analyzer.DirectOptions{BindIface: true})
+			// With BindIface the only setup failure is the uplink lookup: the network is down.
+			d, err := analyzer.NewDirectDialer(analyzer.DirectOptions{BindIface: true})
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", errNoUplink, err)
+			}
+			return d, nil
 		},
 	}
 }
@@ -147,6 +157,18 @@ func (a app) run(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 
 	d, err := a.newDialer()
+	if errors.Is(err, errNoUplink) {
+		// No link at all is a failed calibration, not a broken config: report it like one.
+		fmt.Fprintf(stderr, "%s: network is down: %v\n", binary, err)
+		rep := analyzer.Report{
+			Schema: analyzer.ReportSchema, Version: version.Version, StartedAt: time.Now().UTC(),
+			Calibration: analyzer.Calibration{Internet: analyzer.CheckFailed, DPIPresent: analyzer.CheckUnknown},
+		}
+		if err := emit(stdout, o, rep); err != nil {
+			return fail("write report: %v", err)
+		}
+		return exitCalibration
+	}
 	if err != nil {
 		return fail("cannot set up the direct dialer: %v", err)
 	}
@@ -159,17 +181,8 @@ func (a app) run(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return fail("%v", runErr)
 	}
 
-	if o.jsonPath == "-" {
-		if err := analyzer.EncodeReport(stdout, rep); err != nil {
-			return fail("write report: %v", err)
-		}
-	} else {
-		render(stdout, rep, o.verbose)
-		if o.jsonPath != "" {
-			if err := writeJSON(o.jsonPath, rep); err != nil {
-				return fail("write report: %v", err)
-			}
-		}
+	if err := emit(stdout, o, rep); err != nil {
+		return fail("write report: %v", err)
 	}
 	switch {
 	case runErr != nil:
@@ -179,6 +192,18 @@ func (a app) run(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return exitCalibration
 	}
 	return exitOK
+}
+
+// emit prints the table, or the JSON when --json is "-", and writes the JSON file when --json is a path.
+func emit(stdout io.Writer, o options, rep analyzer.Report) error {
+	if o.jsonPath == "-" {
+		return analyzer.EncodeReport(stdout, rep)
+	}
+	render(stdout, rep, o.verbose)
+	if o.jsonPath != "" {
+		return writeJSON(o.jsonPath, rep)
+	}
+	return nil
 }
 
 func writeJSON(path string, rep analyzer.Report) error {

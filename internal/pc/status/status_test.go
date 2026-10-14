@@ -29,6 +29,7 @@ func sample() Snapshot {
 	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	return Snapshot{
 		Version:   "splitter 1.2.3",
+		State:     "connected",
 		Network:   "AS12389 Rostelecom",
 		LastCheck: at,
 		NextCheck: at.Add(30 * time.Minute),
@@ -137,6 +138,53 @@ type failingAPI struct{ clashapi.Client }
 
 func (failingAPI) Connections(context.Context) (clashapi.Snapshot, error) {
 	return clashapi.Snapshot{}, errors.New("clashapi: GET /connections: 401 secret-in-error")
+}
+
+// countingAPI counts how often the full connection list is downloaded.
+type countingAPI struct {
+	clashapi.Client
+	n int
+}
+
+func (c *countingAPI) Connections(context.Context) (clashapi.Snapshot, error) {
+	c.n++
+	return clashapi.Snapshot{UploadTotal: 1}, nil
+}
+
+func TestTrafficIsCachedBriefly(t *testing.T) {
+	api := &countingAPI{}
+	now := time.Unix(1000, 0)
+	srv := newServer(t, Config{}, api)
+	srv.now = func() time.Time { return now }
+	h := srv.handler()
+	for range 5 {
+		if rec := get(t, h, "GET", "/api/traffic", "127.0.0.1:9091"); rec.Code != 200 {
+			t.Fatalf("code %d", rec.Code)
+		}
+	}
+	if api.n != 1 {
+		t.Fatalf("connection list downloaded %d times for 5 quick calls", api.n)
+	}
+	now = now.Add(trafficMaxAge)
+	get(t, h, "GET", "/api/traffic", "127.0.0.1:9091")
+	if api.n != 2 {
+		t.Fatalf("cached totals not refreshed after %v: %d downloads", trafficMaxAge, api.n)
+	}
+}
+
+func TestListenFindsBusyPortEarly(t *testing.T) {
+	first := newServer(t, Config{Listen: "127.0.0.1:0"}, nil)
+	if err := first.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { first.ln.Close() })
+	first.mu.Lock()
+	port := first.port
+	first.mu.Unlock()
+	second := newServer(t, Config{Listen: "127.0.0.1:" + port}, nil)
+	if err := second.Listen(); err == nil {
+		t.Fatal("second Listen on a busy port succeeded")
+	}
 }
 
 func TestTrafficErrorHidesDetails(t *testing.T) {

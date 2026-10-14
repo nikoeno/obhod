@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | internal/lib/testca (tests) |
 | Build tags | lab |
-| Status | implemented (M3) |
+| Status | implemented (M3, lab L2) |
 
 ## Responsibility
 
@@ -76,13 +76,25 @@ func Run(ctx context.Context, listen string, s Spec, ca Certs) (*Server, error)
 
 // Close stops the server and drops its connections (idempotent).
 func (s *Server) Close()
+
+// Conn is one accepted connection, as the server saw it.
+type Conn struct {
+    Remote netip.AddrPort // the peer's address: proves which route a lab client used
+    SNI    string         // server name from the ClientHello; "" for plain HTTP or when no hello arrived
+    At     time.Time      // accept time
+    Bytes  int64          // bytes written to the peer
+}
+
+// Conns returns every connection accepted so far, oldest first (a copy).
+func (s *Server) Conns() []Conn
 ```
 
 ## Behavior / contract
 
 - RST is produced via `SetLinger(0)` + close.
 - Every behavior is deterministic and has a self-test.
-- It binds to loopback only unless `Run` is given another address (lab namespaces).
+- It binds to loopback only unless `Run` is given another address (lab namespaces). `Run` creates its listener before it returns, so a caller inside a network namespace (`netns.Do`) gets a listener in that namespace.
+- `Conns` records every accepted connection whatever the behavior, including ones the behavior resets or stalls. `Bytes` is final once the connection is closed. The log only grows; a lab server lives for one scenario.
 
 ## Config
 
@@ -94,7 +106,7 @@ Listen failures only.
 
 ## Testing
 
-For each behavior, a raw client asserts the wire-level effect (RST seen, bytes-before-stall, alert code…).
+For each behavior, a raw client asserts the wire-level effect (RST seen, bytes-before-stall, alert code…). `Conns` reports the client's address and SNI for an OK, a reset and a stalled connection.
 
 ## Out of scope
 

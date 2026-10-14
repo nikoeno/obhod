@@ -41,6 +41,9 @@ func TestPinnedCheck(t *testing.T) {
 			es := []route.Entry{
 				{Domain: "a.example", Route: route.Direct, Source: route.SourceChecked}, {Domain: "b.example", Route: route.Desync, Source: route.SourceChecked},
 				{Domain: "c.example", Route: route.Tunnel, Source: route.SourceChecked}, {Domain: "d.example", Route: route.Block, Source: route.SourceStatic},
+				// Nested entries: per-level route rules and the FakeIP DNS rules with domain_suffix + query_type.
+				{Domain: "x.a.example", Route: route.Tunnel, Source: route.SourceChecked}, {Domain: "y.x.a.example", Route: route.Desync, Source: route.SourceChecked},
+				{Domain: "ok.d.example", Route: route.Direct, Source: route.SourceChecked},
 			}
 			ob := Outbounds{Tunnel: tunnel}
 			if withProxy {
@@ -54,6 +57,9 @@ func TestPinnedCheck(t *testing.T) {
 			cfg := baseConfig()
 			cfg.BlockQUIC = quic
 			cfg.Binary = bin
+			if withProxy {
+				cfg.DNS.DirectDoH = "2606:4700::1111" // bare IPv6 form
+			}
 			out, err := Generate(cfg, ob, tb)
 			if err != nil {
 				t.Fatal(err)

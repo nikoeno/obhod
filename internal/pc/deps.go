@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 
 	"github.com/nikoejento/obhod/internal/lib/analyzer"
 	"github.com/nikoejento/obhod/internal/lib/checker"
@@ -37,6 +37,7 @@ type procRunner interface {
 	Status() []procman.ProcStatus
 	Events() <-chan procman.Event
 	CleanupStale(ctx context.Context, names ...string) error
+	Logs(name string) []string
 }
 
 type checkerAPI interface {
@@ -53,6 +54,7 @@ type monitorRunner interface {
 }
 
 type statusRunner interface {
+	Listen() error // binds the port; called at startup so a busy port fails before the tunnel is up
 	Run(ctx context.Context) error
 }
 
@@ -67,11 +69,18 @@ type deps struct {
 
 	uplink      func(ctx context.Context) (netif.Interface, error)
 	watchUplink func(ctx context.Context) (<-chan netif.Event, error)
-	resetDialer func() // the checker's direct dialer is bound to the uplink it was built for
+	resetDialer func() // drops the checker's cached uplink binding at once (it also expires by itself)
 
-	ensure     func(paths.Paths) error // creates the owner-only directories
-	isAdmin    func() (bool, error)
-	nftTable   func(ctx context.Context) (bool, error) // Linux: does the "inet splitter" table exist?
+	ensure       func(paths.Paths) error // creates the owner-only directories
+	lockInstance func(dir string) (release func(), err error)
+	isAdmin      func() (bool, error)
+	// nftTable lists the "inet splitter" table (Linux); ok is false when it is
+	// missing or unreadable. Other systems report ok with an empty listing.
+	nftTable func(ctx context.Context) (listing string, ok bool, err error)
+	// ipRuleList lists the IPv4 policy routing rules (`ip rule show`, read-only;
+	// Linux). Other systems return errors.ErrUnsupported. nil: not checked.
+	ipRuleList func(ctx context.Context) (listing string, err error)
+	lookupHost func(ctx context.Context, host string) ([]netip.Addr, error)
 	singCheck  func(ctx context.Context, binary, file string) error
 	parentUp   func(ctx context.Context, pid int) bool
 	newSecret  func() (string, error)
@@ -92,14 +101,19 @@ func realDeps(cfg Config, p paths.Paths) (*deps, error) {
 		newStatus: func(c status.Config, src status.Source, live clashapi.Client) (statusRunner, error) {
 			return status.New(c, src, live)
 		},
-		uplink:      netif.Uplink,
-		watchUplink: netif.Watch,
-		ensure:      paths.Paths.Ensure,
-		isAdmin:     isAdmin,
-		nftTable:    nftTableExists,
-		singCheck:   singbox.Check,
-		newSecret:   randomHex,
-		parentUp:    processAlive,
+		uplink:       netif.Uplink,
+		watchUplink:  netif.Watch,
+		ensure:       paths.Paths.Ensure,
+		lockInstance: lockInstance,
+		isAdmin:      isAdmin,
+		lookupHost: func(ctx context.Context, host string) ([]netip.Addr, error) {
+			return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		},
+		nftTable:   nftTableExists,
+		ipRuleList: ipRuleShow,
+		singCheck:  singbox.Check,
+		newSecret:  randomHex,
+		parentUp:   processAlive,
 	}
 	d.findBinary = func(name, configured string) (string, error) {
 		return findBinary(name, configured, exe, fileExists)
@@ -122,55 +136,26 @@ func realDeps(cfg Config, p paths.Paths) (*deps, error) {
 	if err != nil {
 		return nil, fmt.Errorf("analyzer: %w", err)
 	}
-	lazy := &lazyDirect{}
+	lazy := newLazyDirect(d.uplink, func(ifc netif.Interface) (analyzer.Dialer, error) {
+		return analyzer.NewDirectDialer(analyzer.DirectOptions{BindIface: true, Uplink: ifc})
+	}, d.clk)
 	d.resetDialer = lazy.reset
+	// Network identification looks the public IP's ASN up over DoH, dialed from the uplink like the probes.
+	doh, err := analyzer.NewDoHResolver(cfg.Analyzer, lazy)
+	if err != nil {
+		return nil, fmt.Errorf("doh resolver: %w", err)
+	}
 	ck, err := checker.New(cc, checker.Deps{
-		Runner:  runner,
-		Dialers: []analyzer.Dialer{lazy},
-		DataDir: p.Data,
+		Runner:   runner,
+		Resolver: doh,
+		Dialers:  []analyzer.Dialer{lazy},
+		DataDir:  p.Data,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("checker: %w", err)
 	}
 	d.checker = ck
 	return d, nil
-}
-
-// lazyDirect is the checker's direct dialer. It is created on first use, so the
-// app starts without a network, and rebuilt after an uplink change, because
-// the real dialer is pinned to one interface (G12: probes never enter the TUN).
-type lazyDirect struct {
-	mu sync.Mutex
-	d  analyzer.Dialer
-}
-
-func (l *lazyDirect) get() (analyzer.Dialer, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.d == nil {
-		d, err := analyzer.NewDirectDialer(analyzer.DirectOptions{BindIface: true})
-		if err != nil {
-			return nil, err
-		}
-		l.d = d
-	}
-	return l.d, nil
-}
-
-func (l *lazyDirect) reset() {
-	l.mu.Lock()
-	l.d = nil
-	l.mu.Unlock()
-}
-
-func (l *lazyDirect) Route() route.Route { return route.Direct }
-
-func (l *lazyDirect) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	d, err := l.get()
-	if err != nil {
-		return nil, err
-	}
-	return d.DialContext(ctx, network, addr)
 }
 
 func randomHex() (string, error) {
@@ -222,6 +207,11 @@ func fileExists(path string) bool {
 // executable and in third_party/bin/<os>-<arch> (the repository layout).
 func findBinary(name, configured, exe string, exists func(string) bool) (string, error) {
 	if configured != "" {
+		// procman starts children with Dir set to the run directory, so a
+		// relative path must be made absolute against the current directory now.
+		if abs, err := filepath.Abs(configured); err == nil {
+			configured = abs
+		}
 		if !exists(configured) {
 			return "", fmt.Errorf("%s binary %q does not exist", name, configured)
 		}

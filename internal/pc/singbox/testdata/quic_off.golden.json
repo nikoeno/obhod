@@ -5,7 +5,13 @@
       {
         "action": "route",
         "domain_suffix": [
-          "a.yt.example",
+          "a.yt.example"
+        ],
+        "server": "dns-direct"
+      },
+      {
+        "action": "route",
+        "domain_suffix": [
           "lan.example",
           "yt.example"
         ],
@@ -130,6 +136,13 @@
         ]
       },
       {
+        "action": "route",
+        "domain_suffix": [
+          "a.yt.example"
+        ],
+        "outbound": "direct"
+      },
+      {
         "action": "reject",
         "domain_suffix": [
           "ads.example"
@@ -159,7 +172,6 @@
       {
         "action": "route",
         "domain_suffix": [
-          "a.yt.example",
           "lan.example"
         ],
         "outbound": "direct"

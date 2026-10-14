@@ -54,6 +54,7 @@ func NewFake(snapshots ...Snapshot) Client // returns snapshots in order, then r
 ## Behavior / contract
 
 - Uses `Authorization: Bearer <secret>`. The secret is never logged.
+- A connection whose `start` cannot be parsed (RFC 3339) gets a zero `Start`; the rest of the snapshot is unaffected.
 - JSON field mapping must be verified against the **pinned sing-box version**.
 
 ## Config

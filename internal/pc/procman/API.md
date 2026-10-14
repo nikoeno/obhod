@@ -83,13 +83,14 @@ func (m *Manager) CleanupStale(ctx context.Context, names ...string) error
 ## Behavior / contract
 
 - Children never outlive the manager's process, even when it crashes or is killed:
-  - Windows: every child is assigned to a Job Object with `KILL_ON_JOB_CLOSE`. The Win32 calls (`CreateJobObjectW`, `SetInformationJobObject`, `AssignProcessToJobObject`) are loaded from `kernel32.dll` via `syscall.NewLazyDLL`, so no extra dependency is needed.
+  - Windows: every child is assigned to a Job Object with `KILL_ON_JOB_CLOSE`. The Win32 calls (`CreateJobObjectW`, `SetInformationJobObject`, `AssignProcessToJobObject`) are loaded from `kernel32.dll` via `syscall.NewLazyDLL`, so no extra dependency is needed. Children get their own process group (`CREATE_NEW_PROCESS_GROUP`), so Ctrl+C in the app's console does not stop them behind the supervisor's back. The structure mirrors are 64-bit only; a 32-bit Windows build fails to compile on purpose.
   - Linux: `Pdeathsig=SIGKILL` + its own process group. Linux sends the signal when the *thread* that started the child exits, so all children are started from one goroutine locked to its OS thread (`runtime.LockOSThread`) that lives as long as the manager.
 - The manager never elevates privileges. If a child fails because admin is needed, it returns `ErrNeedsAdmin` with guidance.
-- stdout/stderr go to a ring buffer and the app log. They are never parsed for decisions.
+- stdout/stderr go to a ring buffer (`Logs`, including a last line without a trailing newline); the app copies them to its log when a process fails. They are never parsed for decisions.
 
 - `Start` polls `Ready` every 100 ms (clock) until it succeeds, the process exits, or ctx ends; the caller's ctx is the readiness timeout. A failed probe stops the process.
-- Restart backoff on unexpected exit: 1 s, 2 s, 4 s ... capped at 30 s; after `MaxRestarts` exits inside `RestartWindow` the state becomes `failed`. A restarted process is not re-probed.
+- Restart backoff on unexpected exit: 1 s, 2 s, 4 s ... capped at 30 s; at most `MaxRestarts` restarts inside `RestartWindow`, so the exit after the last allowed restart (exit number `MaxRestarts`+1) makes the state `failed`. A restarted process is not re-probed.
+- A process with a `Ready` probe that exits before its first successful probe is never restarted, whatever the policy: the state becomes `failed` and `Start` returns at once with the exit reason and the last probe error.
 - `Spec.Env` entries are added to the manager's own environment. `Restart` keeps the process's place in the stop order.
 - `CleanupStale` refuses to run without `Config.BinDir`, skips processes whose path is unreadable, and never kills the current process.
 - Windows has no graceful stop for a child without a console: `Stop` terminates it at once. Linux sends SIGTERM to the process group, then SIGKILL after `StopTimeout`.

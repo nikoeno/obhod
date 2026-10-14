@@ -67,7 +67,10 @@ func (m *Monitor) Stats() Stats
 - Known limit: an idle keep-alive connection that happens to stop inside the stall window looks like a stall. Failures only trigger rechecks, so this costs a probe, not a wrong route.
 - The analyzer's verdict constants live in a lib the monitor may not import, so `monitor` repeats the three string values and a test checks them with `analyzer.Verdict.Valid`.
 - A failed poll changes no state (an API outage is not "every connection closed"); the retry delay doubles from `PollInterval` up to 30 s.
-- A failure is reported to the sink only when the connection has a sniffed host; the stats count it either way. The monitor logs nothing, so no hostname can leak into a log.
+- A failure is reported to the sink only when the connection has a sniffed host; the stats count it either way. The monitor logs nothing, so no hostname can leak into a log. Clash API outages are logged by the app, which wraps the client it passes in.
+- The sink is called from the polling goroutine after the state lock is released, so it must not block. The app's sink is `checker.ReportFailure`: an atomic table load and a scheduler call that never blocks.
+- `Stats.Bytes` is a lower bound: bytes moved between a connection's last sighting and its close are not seen, and a connection that opens and closes between two polls is not counted at all.
+- A closed connection is judged by its last sighting, not its final totals (the Clash API lists open connections only). The false positives this and the other thresholds allow are listed in `docs/REVIEW-NOTES.md`, "Input for decisions" D2; the thresholds stay until D2 is decided.
 - A connection's age comes from `Connection.Start` relative to the snapshot's `At` (so it follows the monitor's clock), or from the first sighting when `Start` is zero.
 
 ## Config

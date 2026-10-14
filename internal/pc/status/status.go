@@ -24,6 +24,7 @@ var ErrNotLoopback = errors.New("status: listen address must be a loopback addre
 // Snapshot is the state shown on the status page.
 type Snapshot struct {
 	Version   string
+	State     string // connection state of the app: disconnected, connecting, connected, disconnecting
 	Network   string // label (ASN name), never the public IP
 	LastCheck time.Time
 	NextCheck time.Time
@@ -64,7 +65,13 @@ type Server struct {
 	live clashapi.Client
 
 	mu   sync.Mutex
-	port string // the port requests must address; set from Listen or the bound listener
+	port string       // the port requests must address; set from Listen or the bound listener
+	ln   net.Listener // bound by Listen, served by Run
+
+	now        func() time.Time // time.Now; tests replace it
+	trafficMu  sync.Mutex
+	trafficAt  time.Time // when trafficVal was fetched
+	trafficVal traffic
 }
 
 // New validates cfg and returns a Server. live may be nil, then /api/traffic reports no data.
@@ -85,7 +92,7 @@ func New(cfg Config, src Source, live clashapi.Client) (*Server, error) {
 	if err := checkLoopbackHost(host); err != nil {
 		return nil, fmt.Errorf("%w: %q", err, cfg.Listen)
 	}
-	s := &Server{cfg: cfg, src: src, live: live}
+	s := &Server{cfg: cfg, src: src, live: live, now: time.Now}
 	if port != "0" {
 		s.port = port
 	}
@@ -115,18 +122,35 @@ func checkLoopbackHost(host string) error {
 	return nil
 }
 
-// Run serves until ctx is done, then shuts down gracefully. It returns nil on
-// a clean shutdown.
-func (s *Server) Run(ctx context.Context) error {
+// Listen binds the listen address without serving yet, so a busy port is
+// found before anything else starts. Run calls it when the caller did not.
+func (s *Server) Listen() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ln != nil {
+		return nil
+	}
 	ln, err := net.Listen("tcp", s.cfg.Listen)
 	if err != nil {
 		return fmt.Errorf("status: listen: %w", err)
 	}
 	if _, port, err := net.SplitHostPort(ln.Addr().String()); err == nil {
-		s.mu.Lock()
 		s.port = port
-		s.mu.Unlock()
 	}
+	s.ln = ln
+	return nil
+}
+
+// Run serves until ctx is done, then shuts down gracefully. It returns nil on
+// a clean shutdown.
+func (s *Server) Run(ctx context.Context) error {
+	if err := s.Listen(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	ln := s.ln
+	s.ln = nil
+	s.mu.Unlock()
 	srv := &http.Server{
 		Handler:           s.handler(),
 		ReadHeaderTimeout: 5 * time.Second,

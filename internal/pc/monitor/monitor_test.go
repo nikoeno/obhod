@@ -380,3 +380,66 @@ func TestDetectPure(t *testing.T) {
 		t.Error("a connection that got an answer was not reset")
 	}
 }
+
+// TestKnownLimitsD2 pins the false positives listed in docs/REVIEW-NOTES.md,
+// "Input for decisions" D2. They stay until D2 is decided; a change of the
+// heuristics must update these cases on purpose. The negative cases right
+// next to each window are real guarantees.
+func TestKnownLimitsD2(t *testing.T) {
+	t.Run("request seen only mid-handshake is judged by its last sighting", func(t *testing.T) {
+		s, api := newScenario(t, Config{})
+		s.step(api, 0, conn("a", "ok.example", "tcp", "direct", 700, 0))
+		s.step(api, 2*time.Second)    // finished normally between two polls
+		s.wantFailures(verdictTLSRST) // D2: false positive
+	})
+	t.Run("keep-alive idle inside the stall window", func(t *testing.T) {
+		s, api := newScenario(t, Config{})
+		s.step(api, 0, conn("a", "page.example", "tcp", "direct", 900, 20<<10))
+		for range 8 { // 16 s idle after a 20 KB page
+			s.step(api, 2*time.Second, conn("a", "page.example", "tcp", "direct", 900, 20<<10))
+		}
+		s.wantFailures(verdictStall1620) // D2: false positive
+	})
+	t.Run("keep-alive idle below and above the stall window", func(t *testing.T) {
+		s, api := newScenario(t, Config{})
+		s.step(api, 0,
+			conn("a", "small.example", "tcp", "direct", 900, 8<<10),
+			conn("b", "big.example", "tcp", "direct", 900, 40<<10))
+		for range 15 {
+			s.step(api, 2*time.Second,
+				conn("a", "small.example", "tcp", "direct", 900, 8<<10),
+				conn("b", "big.example", "tcp", "direct", 900, 40<<10))
+		}
+		s.wantFailures()
+	})
+	t.Run("unused preconnect closed inside the timeout window", func(t *testing.T) {
+		s, api := newScenario(t, Config{})
+		s.step(api, 0, conn("a", "pre.example", "tcp", "direct", 0, 0))
+		for range 5 {
+			s.step(api, 2*time.Second, conn("a", "pre.example", "tcp", "direct", 0, 0))
+		}
+		s.step(api, 2*time.Second)        // closed after 10 s with no byte
+		s.wantFailures(verdictTCPTimeout) // D2: false positive
+	})
+	t.Run("silent connection closed after the timeout window", func(t *testing.T) {
+		s, api := newScenario(t, Config{})
+		s.step(api, 0, conn("a", "idle.example", "tcp", "direct", 0, 0))
+		for range 18 {
+			s.step(api, 2*time.Second, conn("a", "idle.example", "tcp", "direct", 0, 0))
+		}
+		s.step(api, 2*time.Second) // closed after 36 s
+		s.wantFailures()
+	})
+}
+
+// TestBytesAreALowerBound pins the documented Stats.Bytes limit: the Clash
+// API lists open connections only, so the bytes after the last sighting and a
+// connection that lives between two polls are never seen.
+func TestBytesAreALowerBound(t *testing.T) {
+	s, api := newScenario(t, Config{})
+	s.step(api, 0, conn("a", "a.example", "tcp", "tunnel", 100, 1000))
+	s.step(api, 2*time.Second) // closed after moving more bytes; the API no longer lists it
+	if got := s.mon.Stats().Bytes[route.Tunnel]; got != 1100 {
+		t.Fatalf("bytes = %d, want the 1100 seen at the last sighting", got)
+	}
+}

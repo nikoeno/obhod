@@ -105,7 +105,8 @@ func TestLogsRing(t *testing.T) {
 func TestRing(t *testing.T) {
 	r := newRing(2)
 	_, _ = r.Write([]byte("a\r\nb\nc"))
-	if got := strings.Join(r.Lines(), "|"); got != "a|b" {
+	// The unterminated "c" is shown as the newest line; the window stays 2.
+	if got := strings.Join(r.Lines(), "|"); got != "b|c" {
 		t.Fatalf("lines = %q", got)
 	}
 	_, _ = r.Write([]byte("d\n"))
@@ -159,6 +160,36 @@ func TestReadyProcessDies(t *testing.T) {
 	err := m.Start(ctxT(t), s)
 	if err == nil || !strings.Contains(err.Error(), "exited before it was ready") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// With the default policy a child that dies before it is ready must fail
+// Start at once, with its exit status, instead of being restarted until the
+// caller's context runs out.
+func TestReadyProcessDiesDefaultPolicy(t *testing.T) {
+	m := newManager(t, Config{}, clock.Real())
+	s := helperSpec("r", "crasher")
+	s.Ready = func(context.Context) error { return errors.New("down") }
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := m.Start(ctx, s)
+	if err == nil || !strings.Contains(err.Error(), "exited before it was ready") || !strings.Contains(err.Error(), "exit status 3") {
+		t.Fatalf("err = %v", err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("Start took %v: the crash was restarted instead of reported", d)
+	}
+	if st := statusOf(m, "r"); st.State != StateFailed || st.Restarts != 0 {
+		t.Fatalf("status = %+v", st)
+	}
+}
+
+func TestRingKeepsUnterminatedLastLine(t *testing.T) {
+	r := newRing(3)
+	_, _ = r.Write([]byte("one\npanic: boom\r"))
+	if got := strings.Join(r.Lines(), "|"); got != "one|panic: boom" {
+		t.Fatalf("lines = %q", got)
 	}
 }
 
@@ -257,8 +288,20 @@ func TestStopTimeoutKills(t *testing.T) {
 	if err := m.Start(ctx, s); err != nil {
 		t.Fatal(err)
 	}
+	// The helper must have swallowed SIGTERM before Stop sends it; otherwise the
+	// default action kills it, Stop returns at once and the stop timer is gone.
+	waitFor(t, "helper to handle SIGTERM", func() bool {
+		for _, l := range m.Logs("s") {
+			if strings.Contains(l, "HELPER ready") {
+				return true
+			}
+		}
+		return false
+	})
 	stopped := make(chan error, 1)
-	go func() { stopped <- m.Stop(ctx, "s") }()
+	go func() {
+		stopped <- m.Stop(ctx, "s")
+	}()
 	if err := fc.BlockUntil(ctx, 1); err != nil { // the stop timer
 		t.Fatal(err)
 	}
@@ -396,6 +439,12 @@ func TestIsUnder(t *testing.T) {
 	} {
 		if got := isUnder(path, dir); got != want {
 			t.Errorf("isUnder(%q) = %v, want %v", path, got, want)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		// NTFS paths are case-insensitive: a different case is the same directory.
+		if !isUnder(strings.ToUpper(filepath.Join(dir, "sing-box.exe")), dir) {
+			t.Error("isUnder is case-sensitive on Windows")
 		}
 	}
 }

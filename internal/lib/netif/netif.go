@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"runtime"
 	"strings"
 )
 
@@ -41,8 +42,30 @@ func isVirtualName(name string) bool {
 	return false
 }
 
+// isVirtual decides whether an adapter is virtual. The OS answer comes first
+// (Windows: the HardwareInterface flag; Linux: sysfs). On Windows that answer
+// is final, so a physical adapter whose name happens to contain "tun" stays
+// physical and a TUN with any name (the app's own "splitter") is virtual. On
+// Linux the name heuristic is added on top; elsewhere it is all there is.
+func isVirtual(ni net.Interface) bool {
+	v, known := osVirtual(ni)
+	return combineVirtual(ni, v, known)
+}
+
+// combineVirtual merges the OS answer (v, known) with the loopback flag and
+// the name heuristic; see isVirtual.
+func combineVirtual(ni net.Interface, v, known bool) bool {
+	if ni.Flags&net.FlagLoopback != 0 {
+		return true
+	}
+	if known && (v || runtime.GOOS == "windows") {
+		return v
+	}
+	return isVirtualName(ni.Name)
+}
+
 func fromNet(ni net.Interface) Interface {
-	ifc := Interface{Name: ni.Name, Index: ni.Index, Virtual: ni.Flags&net.FlagLoopback != 0 || isVirtualName(ni.Name)}
+	ifc := Interface{Name: ni.Name, Index: ni.Index, Virtual: isVirtual(ni)}
 	addrs, _ := ni.Addrs()
 	for _, a := range addrs {
 		if p, err := netip.ParsePrefix(a.String()); err == nil {

@@ -86,8 +86,14 @@ var privateRanges = []string{
 
 // Generate returns the full sing-box JSON config. Equal input gives equal bytes.
 func Generate(cfg Config, ob Outbounds, t route.Table) ([]byte, error) {
-	if _, err := route.NewTable(t.NetworkID, t.Generated, t.Entries); err != nil {
+	// Render the normalized table (sorted, lowercase, one entry per domain),
+	// not the caller's copy.
+	t, err := route.NewTable(t.NetworkID, t.Generated, t.Entries)
+	if err != nil {
 		return nil, fmt.Errorf("singbox: invalid table: %w", err)
+	}
+	if cfg.ClashSecret == "" {
+		return nil, fmt.Errorf("%w: ClashSecret is empty (the Clash API would be open to every local process)", ErrInvalidCfg)
 	}
 	if len(ob.Tunnel) == 0 {
 		return nil, ErrNoTunnel
@@ -130,8 +136,6 @@ func Generate(cfg Config, ob Outbounds, t route.Table) ([]byte, error) {
 		outbounds = append(outbounds, proxy)
 	}
 
-	direct := t.Domains(route.Direct)
-	desync := t.Domains(route.Desync)
 	rules := []any{
 		obj{"action": "sniff"},
 		obj{"protocol": "dns", "action": "hijack-dns"},
@@ -142,26 +146,44 @@ func Generate(cfg Config, ob Outbounds, t route.Table) ([]byte, error) {
 	if cfg.BlockQUIC {
 		rules = append(rules, obj{"network": "udp", "port": 443, "action": "reject"})
 	}
-	if d := t.Domains(route.Block); len(d) > 0 {
-		rules = append(rules, obj{"domain_suffix": d, "action": "reject"})
-	}
-	for _, r := range []struct {
-		domains []string
-		tag     string
-	}{
-		{t.Domains(route.Proxy), TagProxy},
-		{t.Domains(route.Tunnel), TagTunnel},
-		{desync, TagDesync},
-		{direct, TagDirect},
-	} {
-		if len(r.domains) > 0 {
-			rules = append(rules, obj{"domain_suffix": r.domains, "action": "route", "outbound": r.tag})
+	// sing-box takes the first matching rule, while the table promises the
+	// longest suffix. Entries nested below other entries therefore get their
+	// rules first: deepest nesting level first, the fixed route order within a
+	// level. A table without nested entries has a single level.
+	levels := nestingLevels(t)
+	for _, lv := range levels {
+		if d := lv.byRoute[route.Block]; len(d) > 0 {
+			rules = append(rules, obj{"domain_suffix": d, "action": "reject"})
+		}
+		for _, r := range []struct {
+			route route.Route
+			tag   string
+		}{
+			{route.Proxy, TagProxy},
+			{route.Tunnel, TagTunnel},
+			{route.Desync, TagDesync},
+			{route.Direct, TagDirect},
+		} {
+			if d := lv.byRoute[r.route]; len(d) > 0 {
+				rules = append(rules, obj{"domain_suffix": d, "action": "route", "outbound": r.tag})
+			}
 		}
 	}
 
+	// Direct and desync domains resolve through the direct server. A tunnel,
+	// proxy or block entry below such a suffix needs its own FakeIP rules ahead
+	// of that suffix, or the direct server would answer for it.
 	dnsRules := []any{}
-	if both := sortedUnique(append(append([]string(nil), direct...), desync...)); len(both) > 0 {
-		dnsRules = append(dnsRules, obj{"domain_suffix": both, "action": "route", "server": tagDNSDirect})
+	for _, lv := range levels {
+		if len(lv.fakeBelowDirect) > 0 {
+			dnsRules = append(dnsRules,
+				obj{"domain_suffix": lv.fakeBelowDirect, "query_type": []string{"HTTPS", "SVCB"}, "action": "reject"},
+				obj{"domain_suffix": lv.fakeBelowDirect, "query_type": []string{"A", "AAAA"}, "action": "route", "server": tagDNSFake},
+			)
+		}
+		if both := sortedUnique(append(append([]string(nil), lv.byRoute[route.Direct]...), lv.byRoute[route.Desync]...)); len(both) > 0 {
+			dnsRules = append(dnsRules, obj{"domain_suffix": both, "action": "route", "server": tagDNSDirect})
+		}
 	}
 
 	// sing-box forbids a fakeip default server, so FakeIP is selected by query
@@ -210,6 +232,57 @@ func Generate(cfg Config, ob Outbounds, t route.Table) ([]byte, error) {
 	return append(out, '\n'), nil
 }
 
+// level holds the entries of one nesting level (the number of other table
+// entries that are a parent of the domain).
+type level struct {
+	byRoute map[route.Route][]string // sorted domains per route
+	// fakeBelowDirect are the tunnel, proxy and block domains of this level
+	// that have a direct or desync parent in the table (sorted).
+	fakeBelowDirect []string
+}
+
+// nestingLevels groups the entries of t by nesting level, deepest first. A
+// parent always has a lower level than its children, and two domains of the
+// same level are never parent and child.
+func nestingLevels(t route.Table) []level {
+	byDomain := make(map[string]route.Route, len(t.Entries))
+	for _, e := range t.Entries {
+		byDomain[e.Domain] = e.Route
+	}
+	maxDepth := 0
+	depth := make([]int, len(t.Entries))
+	underDirect := make([]bool, len(t.Entries))
+	for i, e := range t.Entries {
+		for d := e.Domain; ; {
+			j := strings.IndexByte(d, '.')
+			if j < 0 {
+				break
+			}
+			d = d[j+1:]
+			if r, ok := byDomain[d]; ok {
+				depth[i]++
+				if r == route.Direct || r == route.Desync {
+					underDirect[i] = true
+				}
+			}
+		}
+		maxDepth = max(maxDepth, depth[i])
+	}
+	out := make([]level, maxDepth+1)
+	for i := range out {
+		out[i].byRoute = map[route.Route][]string{}
+	}
+	// Entries are sorted by domain, so every list stays sorted.
+	for i, e := range t.Entries {
+		lv := &out[maxDepth-depth[i]]
+		lv.byRoute[e.Route] = append(lv.byRoute[e.Route], e.Domain)
+		if underDirect[i] && e.Route != route.Direct && e.Route != route.Desync {
+			lv.fakeBelowDirect = append(lv.fakeBelowDirect, e.Domain)
+		}
+	}
+	return out
+}
+
 func orDefault(s, def string) string {
 	if s == "" {
 		return def
@@ -234,9 +307,12 @@ func tagged(raw json.RawMessage, tag string) (obj, error) {
 }
 
 func checkLoopback(addr string) error {
-	host, _, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("%w: ClashAPI %q: %v", ErrInvalidCfg, addr, err)
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%w: ClashAPI %q: invalid port", ErrInvalidCfg, addr)
 	}
 	if host == "localhost" {
 		return nil
@@ -255,6 +331,9 @@ func parseDoH(s string) (host string, port int, path string, err error) {
 	}
 	port, path = 443, "/dns-query"
 	if !strings.Contains(s, "://") {
+		if a, aerr := netip.ParseAddr(s); aerr == nil && a.Is6() {
+			s = "[" + s + "]" // bare IPv6 literal
+		}
 		s = "https://" + s
 	}
 	u, perr := url.Parse(s)

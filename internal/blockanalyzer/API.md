@@ -44,7 +44,7 @@ Output: a table `DOMAIN | VERDICT | BLOCKING | STAGE | SUGGESTED` plus calibrati
 
 ## Behavior / contract
 
-- Exit codes: 0 report produced; 1 usage/config error; 2 calibration failed (network down).
+- Exit codes: 0 report produced; 1 usage/config error; 2 calibration failed (network down, including no physical uplink: the report then has `calibration.internet=failed`, no results and no suggestions).
 - The table is plain text (no colors when stdout isn't a TTY). Column widths are stable for golden tests.
 - Reports are written only where asked. Nothing is saved by default.
 

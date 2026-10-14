@@ -72,11 +72,9 @@ func (c *client) Connections(ctx context.Context) (Snapshot, error) {
 			Chains:   wc.Chains,
 			Rule:     wc.Rule,
 		}
-		if wc.Start != "" {
-			t, err := time.Parse(time.RFC3339Nano, wc.Start)
-			if err != nil {
-				return Snapshot{}, fmt.Errorf("clashapi: GET /connections: bad start %q: %w", wc.Start, err)
-			}
+		// An unparsable start leaves Start zero for this connection only, so
+		// one odd entry does not blind the whole snapshot.
+		if t, err := time.Parse(time.RFC3339Nano, wc.Start); err == nil {
 			conn.Start = t
 		}
 		s.Connections = append(s.Connections, conn)

@@ -45,11 +45,19 @@ func (r *ring) push(line string) {
 	r.lines = append(r.lines, line)
 }
 
-// Lines returns the complete lines, oldest first.
+// Lines returns the lines, oldest first, including a last line that has no
+// trailing newline yet (a panic message of a child that died).
 func (r *ring) Lines() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]string(nil), r.lines...)
+	out := append([]string(nil), r.lines...)
+	if len(r.partial) > 0 {
+		out = append(out, strings.TrimSuffix(string(r.partial), "\r"))
+		if len(out) > r.max {
+			out = out[1:]
+		}
+	}
+	return out
 }
 
 func indexByte(b []byte, c byte) int {

@@ -74,16 +74,19 @@ Route mapping:
 | proxy | `proxy` |
 | block | reject |
 
-- Rule order: own processes → direct; QUIC block; block; proxy; tunnel; desync; direct; final → the configured default (tunnel for unknown).
+- Rule order: own processes → direct; QUIC block; then the table entries grouped by nesting level (how many other entries are a parent of the domain), deepest level first, and inside each level: block; proxy; tunnel; desync; direct; final → the configured default (tunnel for unknown). sing-box takes the first matching rule, so this gives the table's longest-suffix semantics (`tunnel example.com` + `direct cdn.example.com` sends the CDN direct). A table without nested entries has one level, i.e. the plain order above.
+- The table is normalized with `route.NewTable` before rendering (sorted, lowercase, one entry per domain), so a hand-built table renders like the equivalent checked one.
+- The `desync` outbound is only a label. Which packets the engine mangles is decided by its hostlist alone, and the engine matches subdomains, so a `direct` entry below a `desync` parent is still mangled by the engine even though sing-box routes it `direct`.
 - Output is byte-identical for equal input (sorted keys and lists) → golden tests work.
 - Field names and options must be verified against the **pinned sing-box version** docs, and every generated config must pass `sing-box check` in CI when the binary is available.
 
 - Generated for sing-box 1.14.2 (verified with `sing-box check`): the legacy-free DNS format (`type: https` / `fakeip` servers), rule actions (`sniff`, `hijack-dns`, `route`, `reject`), `route.default_domain_resolver`, `process_name` for own processes (on Windows pass the base name with `.exe`).
-- DNS: domains routed direct or desync resolve through `DirectDoH`; HTTPS/SVCB queries for everything else are rejected (they would leak the name); A/AAAA go to FakeIP, so tunnel/proxy domains resolve at the remote end. sing-box does not allow a fakeip default server, hence the rules by query type; the default server is `DirectDoH`.
+- DNS: domains routed direct or desync resolve through `DirectDoH` (rules ordered by nesting level like the route rules; a tunnel/proxy/block entry below a direct/desync parent gets its own HTTPS/SVCB reject and A/AAAA FakeIP rules ahead of the parent); HTTPS/SVCB queries for everything else are rejected (they would leak the name); A/AAAA go to FakeIP, so tunnel/proxy domains resolve at the remote end. sing-box does not allow a fakeip default server, hence the rules by query type; the default server is `DirectDoH`.
 - The TUN excludes private ranges (10/8, 169.254/16, 192.168/16, fc00::/7, fe80::/10) so the LAN stays on the physical network. The TUN address and the FakeIP range must not overlap (the defaults do not).
 - `final` is always `tunnel` for now (G6 stays open: the final route has no config field).
-- `ClashAPI` must be a loopback `host:port`; a non-loopback address is an error. `BlockQUIC` is a plain bool: the app config (M9) defaults it to true.
-- `Check` returns the combined output of `sing-box check` wrapped in the error. `Command` is `run -c <file>`.
+- `ClashAPI` must be a loopback `host:port` with a numeric port 1-65535; a non-loopback address is an error. An empty `ClashSecret` is an error (it would open the API to every local process).
+- `DirectDoH` accepts an IP (IPv4 or bare IPv6), or an https URL with an IP host. `BlockQUIC` is a plain bool: the app config (M9) defaults it to true.
+- `Check` returns the combined output of `sing-box check` wrapped in the error, cleaned so it is safe to log: colour codes removed, the config path replaced by `<config>`, characters a decode error quotes from a value (`U+0053 'S'`) redacted, cut to 2 KiB. `Command` is `run -c <file>`.
 
 ## Config
 
@@ -91,7 +94,7 @@ See above.
 
 ## Errors
 
-`Generate`: missing tunnel outbound, invalid table. `Check`: the checker's stderr.
+`Generate`: missing tunnel outbound, invalid table, `ErrInvalidCfg` (Clash API address, empty secret, DoH, FakeIP range, TUN address). `Check`: the checker's stderr.
 
 ## Testing
 

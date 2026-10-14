@@ -152,7 +152,7 @@ func TestRunFlagsAndConfigErrors(t *testing.T) {
 	}
 }
 
-const goodTunnel = `{"type":"vless","server":"203.0.113.7","server_port":443,"uuid":"00000000-0000-0000-0000-000000000000"}`
+const goodTunnel = `{"type":"vless","server":"203.0.113.7","server_port":443,"uuid":"00000000-0000-0000-0000-000000000000","tls":{"enabled":true,"reality":{"enabled":true,"public_key":"PUBKEYMARKERPUBKEYMARKERPUBKEYMARKERPUBKEYM","short_id":"5d0e1d4a"}}}`
 
 func TestCheckConfig(t *testing.T) {
 	h := newCLIHarness(t)
@@ -176,8 +176,10 @@ func TestCheckConfig(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out+h.errOut.String(), "00000000-0000") {
-		t.Fatal("secret content printed")
+	for _, secret := range []string{"00000000-0000", "PUBKEYMARKER", "5d0e1d4a"} {
+		if strings.Contains(out+h.errOut.String(), secret) {
+			t.Fatalf("secret content %q printed", secret)
+		}
 	}
 
 	// sing-box rejects the config.

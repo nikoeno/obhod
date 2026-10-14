@@ -6,7 +6,7 @@
 | Kind | lib |
 | Binary | – |
 | Purpose | probes domains from the local network and classifies whether and how they are blocked |
-| Consumers | internal/blockanalyzer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/netwatch, internal/pc, internal/pc/monitor, internal/router, lab/fakeasn |
+| Consumers | internal/blockanalyzer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/netwatch, internal/pc, internal/pc/monitor, internal/router, lab, lab/fakeasn |
 | Children | internal/lib/analyzer/classify, internal/lib/analyzer/dnscheck, internal/lib/analyzer/dialer, internal/lib/analyzer/lib/verdict |
 | Uses libs | internal/lib/route, internal/lib/clock, internal/lib/proc, internal/lib/version, internal/lib/faultserver (tests), internal/lib/testca (tests) |
 | Build tags | – |
@@ -44,6 +44,7 @@ type (
 func NewDirectDialer(opts DirectOptions) (Dialer, error)
 func NewFakeDialer(script ...DialerStep) Dialer // tests; route direct
 func NewSystemResolver() Resolver               // OS resolver, for Deps.System
+func NewDoHResolver(cfg Config, d Dialer) (Resolver, error) // DoH over cfg.DoH, dialed through d; error on empty cfg.DoH or nil d
 func SystemProcs() proc.Lister                  // OS process list, for Deps.Procs
 
 type Target struct {
@@ -154,6 +155,7 @@ func (c *Config) Validate() error             // also normalizes the domain list
 - The staged pipeline, verdict taxonomy, bulk 16–20 KB test, SNI-swap and calibration are specified in `DESIGN.md` §4–§7. The JSON report shape is in §8.
 - `Probe` never returns an error. All failures are verdicts, and our own failures are `LOCAL_ERROR`.
 - Probes always resolve via DoH (never the system resolver, which may return FakeIP). The system resolver is used only for the poisoning comparison (`Deps.System`); a poisoned answer stops the probe at `resolve` with `DNS_POISONED`.
+- `NewDoHResolver` lets other modules (e.g. the checker's ASN lookup) get a DoH resolver without importing `dnscheck`. Every DoH connection is dialed through the given `Dialer`, so passing a direct dialer keeps lookups out of a TUN. Endpoints come only from `Config.DoH`.
 - Real runs use uTLS browser fingerprints only. The handshake offers ALPN `http/1.1` only, because the probe speaks HTTP/1.1.
 - Certificate verification is deferred until after the handshake so a spoofed certificate is observed (`TLS_MITM` at `verify`).
 - Concurrency limits (`Concurrency`, `PerIPConcurrency`) and jitter are enforced by `Runner`, not by callers.

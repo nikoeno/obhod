@@ -39,6 +39,7 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(3)
 	case "slow-stopper":
 		signal.Ignore(syscall.SIGTERM)
+		fmt.Println("HELPER ready") // SIGTERM is handled from here on; tests wait for this line
 		time.Sleep(time.Hour)
 	case "chatty":
 		n, _ := strconv.Atoi(os.Getenv("HELPER_N"))

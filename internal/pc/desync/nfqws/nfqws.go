@@ -18,6 +18,10 @@ var ErrInvalid = errors.New("nfqws: invalid input")
 // resolves it relative to its working directory.
 const HostlistName = "hostlist.txt"
 
+// Identity is the --uid argument the renderer always passes: nfqws2 keeps the
+// uid of the app (root) instead of dropping to uid 2147483647. See API.md.
+const Identity = "--uid=0:0"
+
 const (
 	// DefaultMark is the mark zapret2 puts on its own packets.
 	DefaultMark uint32 = 0x40000000
@@ -55,8 +59,8 @@ type Output struct {
 	Path     string
 	Args     []string
 	Hostlist []byte
-	NFTSetup []string // shell commands, printed for the human
-	NFTDown  []string
+	NFTSetup []string // shell commands (nft rules, then the ip rule exemption), printed for the human
+	NFTDown  []string // the matching removal commands
 }
 
 // Render builds the nfqws2 arguments, the hostlist and the nft commands.
@@ -112,15 +116,15 @@ func Render(in Input) (Output, error) {
 		}
 		args = append(args, "--lua-init=@"+luaDir+"/"+f)
 	}
-	args = append(args, "--hostlist="+HostlistName)
+	args = append(args, "--hostlist="+HostlistName, Identity)
 	args = append(args, in.Strategy...)
 
 	return Output{
 		Path:     in.Binary,
 		Args:     args,
 		Hostlist: hostlist,
-		NFTSetup: nftRules(in.Uplink, qnum, mark, ports, in.ExcludeIPs, in.ExcludePorts),
-		NFTDown:  nftDown(),
+		NFTSetup: append(nftRules(in.Uplink, qnum, mark, ports, in.ExcludeIPs, in.ExcludePorts), ipRuleSetup(mark)...),
+		NFTDown:  append(nftDown(), ipRuleDown(mark)...),
 	}, nil
 }
 

@@ -17,6 +17,7 @@ const (
 	jobLimitKillOnClose    = 0x2000 // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
 	processSetQuota        = 0x0100
 	processTerminate       = 0x0001
+	createNewProcessGroup  = 0x00000200 // CREATE_NEW_PROCESS_GROUP: Ctrl+C in our console does not reach the child
 )
 
 var (
@@ -49,6 +50,14 @@ type extendedLimit struct {
 	PeakProcessMemoryUsed uintptr
 	PeakJobMemoryUsed     uintptr
 }
+
+// JOBOBJECT_EXTENDED_LIMIT_INFORMATION is 144 bytes on 64-bit Windows. On
+// 32-bit targets Go aligns int64 to 4 bytes where C uses 8, so the mirror
+// would be wrong; these lines stop such a build instead of passing a bad size.
+var (
+	_ [144 - unsafe.Sizeof(extendedLimit{})]struct{}
+	_ [unsafe.Sizeof(extendedLimit{}) - 144]struct{}
+)
 
 // windowsPlatform assigns every child to one Job Object with KILL_ON_JOB_CLOSE.
 // The handle is never closed: when our process dies, Windows closes it and
@@ -88,7 +97,10 @@ func (p *windowsPlatform) start(cmd *exec.Cmd) error {
 	if err != nil {
 		return fmt.Errorf("procman: job object: %w", err)
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	// Stop is always TerminateProcess, so the child needs no console signals;
+	// its own process group keeps our Ctrl+C from stopping it behind the
+	// supervisor's back during shutdown.
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNewProcessGroup}
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -105,7 +117,9 @@ func (p *windowsPlatform) start(cmd *exec.Cmd) error {
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		return fmt.Errorf("procman: assign to job object: %w", err)
+		// Not wrapped: an ERROR_ACCESS_DENIED here is a job problem, not
+		// missing admin rights, and must not be classified as ErrNeedsAdmin.
+		return fmt.Errorf("procman: assign to job object: %v", err)
 	}
 	return nil
 }

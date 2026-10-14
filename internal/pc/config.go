@@ -2,6 +2,7 @@ package pc
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -148,11 +149,29 @@ func (c Config) Validate() error {
 	}
 	if c.SingBox.DNS.DirectDoH == "" {
 		add("singbox.dns.direct_doh: required")
+	} else if err := checkSingBox(c.SingBox); err != nil {
+		// singbox.dns.direct_doh defaults to analyzer.doh[0], which must then be an IP URL too.
+		add("singbox: %w", err)
+	}
+	if err := c.Desync.Check(); err != nil {
+		add("desync: %w", err)
+	}
+	if err := c.Checker.Validate(); err != nil {
+		add("%w", err)
 	}
 	if _, err := status.New(c.Status, nopSource{}, nil); err != nil {
 		add("status: %w", err)
 	}
 	return errors.Join(errs...)
+}
+
+// checkSingBox renders a config for an empty table with a stand-in outbound,
+// so the sing-box fields (TUN address, FakeIP range, Clash API, DoH server)
+// fail when the config is loaded, not at connect time.
+func checkSingBox(c singbox.Config) error {
+	c.ClashSecret = "validate"
+	_, err := singbox.Generate(c, singbox.Outbounds{Tunnel: json.RawMessage(`{"type":"direct"}`)}, route.Table{})
+	return err
 }
 
 type nopSource struct{}

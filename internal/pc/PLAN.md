@@ -32,7 +32,7 @@ Deviations from the milestone text (all recorded in the modules' `API.md`):
 - **sing-box needs a non-fakeip default DNS server**, so FakeIP is selected by query type (A/AAAA); HTTPS/SVCB queries for non-direct domains are rejected. Verified with the pinned `sing-box check`.
 - **WinDivert has no CIDR**, so exclude prefixes become address ranges. **nftables** excludes are early `return` rules, because `ip daddr != X` inside the queue rule would exclude all IPv6 traffic.
 - **M10 test claim "a change that touches only desync domains restarts only the engine" does not hold**: moving a domain to or from `desync` changes the sing-box rules too (the `desync` outbound is a separate tag, G5). Both processes restart, the engine first; a change that does not touch `desync` restarts sing-box only. Tested as such.
-- **Checker probes after an uplink change:** the checker's direct dialer is rebuilt lazily (`lazyDirect`) when `netif` reports a change.
+- **Checker probes after an uplink change:** the checker's direct dialer (`lazyDirect`, `direct.go`) re-resolves `netif.Uplink` when its cached binding is older than 2 s, after the uplink watcher fires, and after any failed dial (retried once if the uplink changed), so a switch needs no further event.
 - **winws2.exe needs elevation even for `--help`**, so the flag check reads the binary's strings; `nfqws2` is packed (no strings), so `--fwmark` is unverified (it is only emitted for a non-default mark).
 - The monitor logs nothing and reads no JSON fixtures: its snapshot sequences are built in Go in the tests.
 

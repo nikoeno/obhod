@@ -53,13 +53,16 @@ func (s *Server) Run(ctx context.Context) error
 
 Endpoints: `GET /` (HTML, embedded assets), `GET /api/status` (JSON Snapshot), `GET /api/traffic` (proxied Clash traffic numbers).
 
+- `Snapshot.State` is the app's connection state (disconnected, connecting, connected, disconnecting); the page shows it.
+- `func (s *Server) Listen() error` binds the listen address without serving, so the app finds a busy port before it starts the tunnel; `Run` calls it when the caller did not.
+
 ## Behavior / contract
 
 - Read-only: no endpoint changes state.
 - Binds to loopback only. The listen address is validated.
 - No external assets (no CDNs); everything is embedded.
 
-- `GET /api/traffic` returns `{"uploadTotal","downloadTotal","connections"}` from the live Clash API: totals and a count, never a host or an address. If the Clash API fails it answers 502 with a fixed message (no details). With a nil `live` it answers zeros.
+- `GET /api/traffic` returns `{"uploadTotal","downloadTotal","connections"}` from the live Clash API: totals and a count, never a host or an address. If the Clash API fails it answers 502 with a fixed message (no details). With a nil `live` it answers zeros. A successful answer is reused for 2 s, so repeated calls do not download the full connection list each time (the page itself does not call this endpoint).
 - `Listen` must be a loopback IP or `localhost` (resolved: every address must be loopback); a host name otherwise, `0.0.0.0`, `::`, an empty host and a missing port are rejected with `ErrNotLoopback` or a parse error. Port 0 is allowed (the OS picks one; tests use it).
 - Every response (also errors) carries `Content-Security-Policy: default-src 'self'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`. There are no CORS headers; a preflight gets 405.
 - The `Host` header must be a loopback IP or `localhost` on the server's port, otherwise 403 (DNS-rebinding guard). Only GET is allowed (everything else 405 with `Allow: GET`).

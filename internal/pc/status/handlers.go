@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"time"
 )
 
 //go:embed assets
@@ -124,9 +125,19 @@ func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.src.Snapshot())
 }
 
+// trafficMaxAge bounds how often /api/traffic downloads the full connection
+// list from sing-box; calls in between get the cached totals.
+const trafficMaxAge = 2 * time.Second
+
 func (s *Server) apiTraffic(w http.ResponseWriter, r *http.Request) {
 	if s.live == nil {
 		writeJSON(w, http.StatusOK, traffic{})
+		return
+	}
+	s.trafficMu.Lock()
+	defer s.trafficMu.Unlock()
+	if !s.trafficAt.IsZero() && s.now().Sub(s.trafficAt) < trafficMaxAge {
+		writeJSON(w, http.StatusOK, s.trafficVal)
 		return
 	}
 	snap, err := s.live.Connections(r.Context())
@@ -135,11 +146,13 @@ func (s *Server) apiTraffic(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "traffic data unavailable"})
 		return
 	}
-	writeJSON(w, http.StatusOK, traffic{
+	s.trafficVal = traffic{
 		UploadTotal:   snap.UploadTotal,
 		DownloadTotal: snap.DownloadTotal,
 		Connections:   len(snap.Connections),
-	})
+	}
+	s.trafficAt = s.now()
+	writeJSON(w, http.StatusOK, s.trafficVal)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

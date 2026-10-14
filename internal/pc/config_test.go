@@ -209,9 +209,17 @@ func TestFindBinary(t *testing.T) {
 	if _, err := findBinary("sing-box", "/x/custom", "/app/splitter", has); err == nil {
 		t.Fatal("a configured but missing binary must be an error")
 	}
-	exists["/x/custom"] = true
-	if got, err := findBinary("sing-box", "/x/custom", "/app/splitter", has); err != nil || got != "/x/custom" {
+	custom, _ := filepath.Abs(filepath.FromSlash("/x/custom"))
+	exists[filepath.ToSlash(custom)] = true
+	if got, err := findBinary("sing-box", "/x/custom", "/app/splitter", has); err != nil || got != custom {
 		t.Fatalf("got %q, %v", got, err)
+	}
+	// A relative path is resolved against the current directory now: procman
+	// starts the child in the run directory, where it would not resolve.
+	rel, _ := filepath.Abs(filepath.Join("bin", "sing-box"))
+	exists[filepath.ToSlash(rel)] = true
+	if got, err := findBinary("sing-box", filepath.Join("bin", "sing-box"), "/app/splitter", has); err != nil || got != rel {
+		t.Fatalf("relative: got %q, %v", got, err)
 	}
 	if _, err := findBinary("sing-box", "", filepath.FromSlash("/app/splitter"), has); err == nil {
 		t.Fatal("found a binary that does not exist")

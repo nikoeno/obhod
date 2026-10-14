@@ -3,6 +3,7 @@ package desync
 import (
 	"errors"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func TestBuildNFQWS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Engine != NFQWS || len(p.Setup) == 0 || len(p.Teardown) != 1 {
+	if p.Engine != NFQWS || len(p.Setup) == 0 || len(p.Teardown) != 2 {
 		t.Fatalf("plan = %+v", p)
 	}
 	if !strings.Contains(strings.Join(p.Setup, "\n"), `oifname "eth0"`) ||
@@ -72,6 +73,9 @@ func TestBuildNFQWS(t *testing.T) {
 	}
 	if string(p.Files["hostlist.txt"]) != "yt.example\n" || p.Args[0] != "--qnum=200" {
 		t.Fatalf("plan = %+v", p)
+	}
+	if !strings.Contains(strings.Join(p.Args, " "), "--hostlist=hostlist.txt") || !slices.Contains(p.Args, "--uid=0:0") {
+		t.Fatalf("args = %q", p.Args)
 	}
 }
 
@@ -134,6 +138,83 @@ func TestVirtualUplinkRejected(t *testing.T) {
 func TestUnsupportedEngine(t *testing.T) {
 	if _, err := Build(cfg("bogus"), uplink(), desyncTable(t)); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("err = %v", err)
+	}
+	// The engine is checked before the empty list.
+	if _, err := Build(cfg("bogus"), uplink(), tableOf(t)); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("empty list: err = %v", err)
+	}
+}
+
+func TestVirtualUplinkWithEmptyListIsEmptyPlan(t *testing.T) {
+	up := uplink()
+	up.Virtual = true
+	p, err := Build(cfg(WinWS), up, tableOf(t,
+		route.Entry{Domain: "a.example", Route: route.Direct, Source: route.SourceChecked}))
+	if err != nil || p.Path != "" || p.Engine != WinWS {
+		t.Fatalf("plan = %+v, err = %v", p, err)
+	}
+}
+
+func TestStrategyCannotOverrideAppOptions(t *testing.T) {
+	for _, arg := range []string{
+		"--wf-raw-filter=true", "--wf-iface=1", "--wf-save=x.txt", "--wf-tcp-out=1-65535",
+		"--new", "--skip", "--hostlist=/etc/other.txt", "--hostlist-domains=example.com",
+		"--hostlist-auto=auto.txt", "--uid=1000", "--user=nobody", "--ipset=ips.txt", "--qnum=1", "--fwmark=0x1",
+		"--lua-init=@evil.lua", "@args.txt",
+	} {
+		for _, e := range []Engine{WinWS, NFQWS} {
+			c := cfg(e)
+			c.Strategy = append(c.Strategy, arg)
+			if _, err := Build(c, uplink(), desyncTable(t)); !errors.Is(err, ErrInvalidConfig) {
+				t.Errorf("%s %q: err = %v", e, arg, err)
+			}
+			// Also with no desync domains: a bad config is an error either way.
+			if _, err := Build(c, uplink(), tableOf(t)); !errors.Is(err, ErrInvalidConfig) {
+				t.Errorf("%s %q, empty list: err = %v", e, arg, err)
+			}
+		}
+	}
+	c := cfg(WinWS)
+	c.Strategy = []string{"--filter-tcp=443", "--filter-l7=tls", "--payload=tls_client_hello", "--lua-desync=fake:blob=fake_default_tls", "--newline"}
+	if _, err := Build(c, uplink(), desyncTable(t)); err != nil {
+		t.Fatalf("ordinary strategy rejected: %v", err)
+	}
+}
+
+func TestConfigCheck(t *testing.T) {
+	for name, mut := range map[string]func(*Config){
+		"port 0":         func(c *Config) { c.Ports = []uint16{443, 0} },
+		"reversed range": func(c *Config) { c.ExcludePorts = []PortRange{{2000, 1000}} },
+		"zero range":     func(c *Config) { c.ExcludePorts = []PortRange{{0, 10}} },
+		"invalid prefix": func(c *Config) { c.ExcludeIPs = append(c.ExcludeIPs, netip.Prefix{}) },
+		"lua path":       func(c *Config) { c.LuaInit = []string{"../x.lua"} },
+	} {
+		c := cfg(WinWS)
+		mut(&c)
+		if err := c.Check(); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	if err := cfg(NFQWS).Check(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIPv4MappedExcludeIsUnmapped(t *testing.T) {
+	for _, e := range []Engine{WinWS, NFQWS} {
+		c := cfg(e)
+		c.ExcludeIPs = []netip.Prefix{netip.MustParsePrefix("::ffff:198.51.100.9/128"), netip.MustParsePrefix("::ffff:192.0.2.0/120")}
+		p, err := Build(c, uplink(), desyncTable(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		all := strings.Join(append(p.Args, p.Setup...), " ")
+		if strings.Contains(all, "::ffff") || strings.Contains(all, "ipv6.DstAddr") || strings.Contains(all, "ip6 daddr") {
+			t.Fatalf("%s: mapped address rendered as IPv6: %s", e, all)
+		}
+		if !strings.Contains(all, "198.51.100.9") || !strings.Contains(all, "192.0.2.") {
+			t.Fatalf("%s: unmapped address missing: %s", e, all)
+		}
 	}
 }
 

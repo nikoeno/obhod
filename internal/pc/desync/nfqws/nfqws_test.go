@@ -125,17 +125,51 @@ func TestNFTShape(t *testing.T) {
 	}
 	// Nothing but our own table is ever touched.
 	for _, c := range append(append([]string(nil), out.NFTSetup...), out.NFTDown...) {
-		if !strings.Contains(c, "inet splitter") {
+		if !strings.Contains(c, "inet splitter") && !strings.HasPrefix(c, "ip rule ") {
 			t.Errorf("command outside our table: %s", c)
 		}
 	}
-	if len(out.NFTDown) != 1 || out.NFTDown[0] != "nft delete table inet splitter" {
+	if len(out.NFTDown) != 2 || out.NFTDown[0] != "nft delete table inet splitter" {
 		t.Fatalf("down = %q", out.NFTDown)
 	}
 	for _, c := range out.NFTSetup {
-		if strings.Contains(c, "flush") || strings.Contains(c, "sysctl") {
+		// Flushing our own table makes the setup re-runnable; anything wider
+		// (flush ruleset) is forbidden.
+		if (strings.Contains(c, "flush") && c != "nft flush table inet splitter") || strings.Contains(c, "sysctl") {
 			t.Errorf("forbidden command: %s", c)
 		}
+	}
+	// Re-running the setup must not duplicate rules: the flush comes right
+	// after the table exists and before the first rule.
+	if len(out.NFTSetup) < 3 || out.NFTSetup[0] != "nft add table inet splitter" || out.NFTSetup[1] != "nft flush table inet splitter" {
+		t.Errorf("setup does not start with add + flush of our table:\n%s", all)
+	}
+}
+
+func TestIPRule(t *testing.T) {
+	out, err := Render(baseInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const spec = "fwmark 0x40000000/0x40000000 lookup main priority 8999"
+	if got := out.NFTSetup[len(out.NFTSetup)-1]; got != "ip rule add "+spec {
+		t.Errorf("last setup command = %q", got)
+	}
+	if got := out.NFTDown[len(out.NFTDown)-1]; got != "ip rule del "+spec {
+		t.Errorf("last down command = %q", got)
+	}
+	// A custom mark is the one --fwmark carries and the rule matches.
+	in := baseInput()
+	in.Mark = 0x20000000
+	out, err = Render(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.NFTSetup[len(out.NFTSetup)-1]; got != "ip rule add fwmark 0x20000000/0x20000000 lookup main priority 8999" {
+		t.Errorf("custom mark rule = %q", got)
+	}
+	if !strings.Contains(strings.Join(out.Args, " "), "--fwmark=0x20000000") {
+		t.Errorf("args = %q", out.Args)
 	}
 }
 

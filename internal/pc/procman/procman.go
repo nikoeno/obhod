@@ -107,6 +107,7 @@ type entry struct {
 	restarts int
 	lastErr  string
 	stopping bool
+	ready    bool        // the readiness probe succeeded (or there is none)
 	failures []time.Time // unexpected exits inside the restart window
 	ring     *ring
 	cancel   context.CancelFunc // wakes the supervisor out of a backoff sleep
@@ -215,6 +216,7 @@ func (m *Manager) Start(ctx context.Context, s Spec) error {
 	e.cancel = cancel
 	e.cmd, e.pid, e.started = cmd, cmd.Process.Pid, m.clk.Now()
 	if s.Ready == nil {
+		e.ready = true
 		m.setState(e, s.Name, StateRunning, nil)
 	}
 	m.mu.Unlock()
@@ -263,6 +265,7 @@ func (m *Manager) waitReady(ctx context.Context, e *entry) error {
 		last = e.spec.Ready(ctx)
 		if last == nil {
 			m.mu.Lock()
+			e.ready = true
 			if e.state == StateStarting {
 				m.setState(e, name, StateRunning, nil)
 			}
@@ -271,7 +274,10 @@ func (m *Manager) waitReady(ctx context.Context, e *entry) error {
 		}
 		select {
 		case <-e.done:
-			return fmt.Errorf("procman: %s exited before it was ready: %w", name, last)
+			m.mu.Lock()
+			reason := e.lastErr
+			m.mu.Unlock()
+			return fmt.Errorf("procman: %s exited before it was ready (%s): %w", name, reason, last)
 		default:
 		}
 		if err := m.clk.Sleep(ctx, readyPoll); err != nil {
@@ -302,9 +308,12 @@ func (m *Manager) supervise(ctx context.Context, e *entry, cmd *exec.Cmd) {
 		}
 		e.pid, e.cmd = 0, nil
 		e.lastErr = exitReason(waitErr)
-		if e.spec.Restart == RestartNever {
+		// A process that dies before its first readiness is a start failure,
+		// not a crash to restart: Start reports it at once instead of waiting
+		// through the whole backoff schedule.
+		if e.spec.Restart == RestartNever || !e.ready {
 			st := StateFailed
-			if waitErr == nil {
+			if waitErr == nil && e.ready {
 				st = StateStopped
 			}
 			m.setState(e, name, st, waitErr)

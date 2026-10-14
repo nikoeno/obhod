@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -78,6 +80,9 @@ const (
 	parentPoll      = 2 * time.Second
 	recentChanges   = 20
 	singBoxFileName = "sing-box.json"
+	procLogTail     = 20 // lines of a failed process copied to the app log
+	lookupTimeout   = 5 * time.Second
+	defaultTUNName  = "splitter" // singbox's default interface name
 )
 
 // Option customizes New.
@@ -107,7 +112,7 @@ type App struct {
 	haveOutbounds bool
 
 	// op serializes connect, disconnect and reload.
-	op sync.Mutex
+	op opLock
 
 	mu         sync.Mutex
 	runCtx     context.Context
@@ -124,7 +129,31 @@ type App struct {
 	monDone    chan struct{}
 	dialClash  clashapi.Client
 	binaries   binaries
+
+	release     func()        // releases the single-instance lock
+	onFatal     func(error)   // ends Run with an error
+	tunnelAddrs []netip.Addr  // resolved addresses of a host-name tunnel server
+	clashWatch  *watchedClash // the monitor's Clash API client; reports outages
 }
+
+// opLock is a mutex whose Lock gives up when ctx ends, so a shutdown is not
+// held up by a connect in progress.
+type opLock struct{ ch chan struct{} }
+
+func newOpLock() opLock { return opLock{ch: make(chan struct{}, 1)} }
+
+// Lock takes the lock or returns ctx's error.
+func (l opLock) Lock(ctx context.Context) error {
+	select {
+	case l.ch <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Unlock releases the lock.
+func (l opLock) Unlock() { <-l.ch }
 
 // task is a background goroutine that can be stopped and waited for.
 type task struct {
@@ -150,6 +179,7 @@ type engineState struct {
 	name    string
 	args    string // joined; a change restarts the engine
 	files   map[string]string
+	setup   string // nft commands the engine relies on (Linux); a change needs the rules re-checked
 }
 
 type binaries struct{ singBox, desync string }
@@ -157,7 +187,7 @@ type binaries struct{ singBox, desync string }
 // New builds the App and every child. Nothing is started and no file is
 // changed. With real dependencies it reads the check lists and the decision store.
 func New(cfg Config, p paths.Paths, opts ...Option) (*App, error) {
-	a := &App{cfg: cfg, p: p, log: slog.New(slog.NewTextHandler(io.Discard, nil)), state: StateDisconnected}
+	a := &App{cfg: cfg, p: p, log: slog.New(slog.NewTextHandler(io.Discard, nil)), state: StateDisconnected, op: newOpLock()}
 	for _, o := range opts {
 		o(a)
 	}
@@ -194,6 +224,7 @@ func (a *App) setState(s State) {
 func (a *App) Run(ctx context.Context) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer a.releaseInstance()
 
 	// 1. Pre-flight.
 	if err := a.preflight(ctx); err != nil {
@@ -228,7 +259,21 @@ func (a *App) Run(ctx context.Context) (err error) {
 		}()
 		return task{cancel: cancel, done: done}
 	}
+	a.mu.Lock()
+	a.onFatal = func(e error) {
+		select {
+		case fatal <- e:
+		default:
+		}
+	}
+	a.mu.Unlock()
 	checkerTask := run("checker", a.d.checker.Run)
+	// Subscribe before the first Table() and before Connect: a table published
+	// while sing-box starts (the stored decisions, once the network is
+	// identified) is then waiting in the channel when the reload loop starts.
+	// Subscribing first means Table() is at least as new as anything missed.
+	tables, unsub := a.d.checker.Subscribe()
+	defer unsub()
 	a.setTable(a.d.checker.Table())
 
 	var statusTask task
@@ -250,6 +295,20 @@ func (a *App) Run(ctx context.Context) (err error) {
 		}
 	}
 
+	// The status port is bound before the tunnel comes up, so a port that is
+	// already in use stops the start instead of tearing the tunnel down later.
+	srv, serr := a.d.newStatus(a.cfg.Status, &statusSource{a: a}, a.liveClient())
+	if serr == nil {
+		if lerr := srv.Listen(); lerr != nil {
+			serr = fmt.Errorf("%v (is another program using the port? change status.listen)", lerr)
+		}
+	}
+	if serr != nil {
+		err = fail(exitConfig, "status: %v", serr)
+		shutdown()
+		return err
+	}
+
 	// Connected state: steps 3-5 of the startup order.
 	if !a.ui {
 		if cerr := a.Connect(ctx); cerr != nil {
@@ -258,18 +317,12 @@ func (a *App) Run(ctx context.Context) (err error) {
 			return err
 		}
 	}
-	srv, serr := a.d.newStatus(a.cfg.Status, &statusSource{a: a}, a.liveClient())
-	if serr != nil {
-		err = fail(exitConfig, "status: %v", serr)
-		shutdown()
-		return err
-	}
 	statusTask = run("status", srv.Run)
 
 	// Background loops.
 	reloadCtx, stopReload := context.WithCancel(context.WithoutCancel(ctx))
 	wg.Add(1)
-	go func() { defer wg.Done(); a.reloadLoop(reloadCtx) }()
+	go func() { defer wg.Done(); a.reloadLoop(reloadCtx, tables) }()
 	defer stopReload()
 	if a.parentPID > 0 {
 		wg.Add(1)
@@ -301,6 +354,15 @@ func (a *App) preflight(ctx context.Context) error {
 		}
 		a.log.Warn("could not restrict directory permissions", "err", err)
 	}
+	if a.d.lockInstance != nil {
+		release, err := a.d.lockInstance(a.p.Run)
+		if err != nil {
+			return fail(exitRuntime, "%v", err)
+		}
+		a.mu.Lock()
+		a.release = release
+		a.mu.Unlock()
+	}
 	if !a.haveOutbounds {
 		ob, err := loadSecrets(a.cfg.Secrets, a.p)
 		if err != nil {
@@ -312,6 +374,16 @@ func (a *App) preflight(ctx context.Context) error {
 		a.log.Warn("cleanup of stale processes", "err", err)
 	}
 	return nil
+}
+
+func (a *App) releaseInstance() {
+	a.mu.Lock()
+	release := a.release
+	a.release = nil
+	a.mu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 func (a *App) setTable(t route.Table) {
@@ -354,16 +426,22 @@ func (a *App) liveClient() clashapi.Client {
 // Connect starts the desync engine, sing-box and the monitor. It is a no-op
 // when already connected. On failure everything it started is stopped again.
 func (a *App) Connect(ctx context.Context) error {
-	a.op.Lock()
+	a.mu.Lock()
+	runCtx := a.runCtx
+	a.mu.Unlock()
+	if runCtx == nil {
+		return errors.New("pc: Connect needs a running App")
+	}
+	// A connect started by the UI must not outlive Run: shutdown cancels it.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(runCtx, cancel)()
+	if err := a.op.Lock(ctx); err != nil {
+		return err
+	}
 	defer a.op.Unlock()
 	if a.State() == StateConnected {
 		return nil
-	}
-	a.mu.Lock()
-	running := a.runCtx != nil
-	a.mu.Unlock()
-	if !running {
-		return errors.New("pc: Connect needs a running App")
 	}
 	a.setState(StateConnecting)
 	if err := a.connectLocked(ctx); err != nil {
@@ -379,16 +457,14 @@ func (a *App) Connect(ctx context.Context) error {
 // Disconnect stops the monitor, sing-box and the desync engine, in that
 // order, and keeps the checker running.
 func (a *App) Disconnect(ctx context.Context) error {
-	a.op.Lock()
+	if err := a.op.Lock(ctx); err != nil {
+		return err
+	}
 	defer a.op.Unlock()
 	return a.disconnectLocked(ctx)
 }
 
-func (a *App) disconnect(ctx context.Context) error {
-	a.op.Lock()
-	defer a.op.Unlock()
-	return a.disconnectLocked(ctx)
-}
+func (a *App) disconnect(ctx context.Context) error { return a.Disconnect(ctx) }
 
 func (a *App) disconnectLocked(ctx context.Context) error {
 	if a.State() == StateDisconnected {
@@ -417,9 +493,13 @@ func (a *App) connectLocked(ctx context.Context) error {
 	if err != nil {
 		return fail(exitConfig, "%v", err)
 	}
+	a.resolveTunnel(ctx)
 	r, err := a.render(ctx, bins, table, true)
 	if err != nil {
 		return err
+	}
+	if r.planErr != nil {
+		return r.planErr
 	}
 
 	// Desync engine.
@@ -434,6 +514,7 @@ func (a *App) connectLocked(ctx context.Context) error {
 		err := a.d.procs.Start(sctx, a.engineSpec(r.plan))
 		cancel()
 		if err != nil {
+			a.logProcOutput(string(r.plan.Engine))
 			return a.startError("desync engine", err)
 		}
 		a.rememberEngine(r.plan)
@@ -448,6 +529,7 @@ func (a *App) connectLocked(ctx context.Context) error {
 	err = a.d.procs.Start(sctx, a.singBoxSpec(bins, cfgFile))
 	cancel()
 	if err != nil {
+		a.logProcOutput(nameSingBox)
 		return a.startError("sing-box", err)
 	}
 	a.mu.Lock()
@@ -466,21 +548,64 @@ func (a *App) startError(what string, err error) error {
 }
 
 // checkNFT, on Linux, refuses to start when the nftables table that feeds the
-// engine is missing. The app never applies firewall rules; it prints the commands.
+// engine is missing or stale, or when the routing exemption for the engine's
+// fwmark (an `ip rule` that sends marked packets around the tunnel's policy
+// routing) is missing. The app never applies firewall rules or routes; it
+// prints the commands. Only the commands that are still needed are printed
+// (a second `ip rule add` would create a duplicate); Teardown lists them all.
 func (a *App) checkNFT(ctx context.Context, plan desync.Plan) error {
 	if len(plan.Setup) == 0 {
 		return nil
 	}
-	ok, err := a.d.nftTable(ctx)
+	listing, ok, err := a.d.nftTable(ctx)
 	if err != nil {
 		return fail(exitManual, "cannot check the nftables table (is nft installed?): %v", err)
 	}
+	var nftCmds, ipCmds []string // all nft commands; the ip rule commands still missing
+	hasIP := false
+	for _, c := range plan.Setup {
+		if strings.HasPrefix(c, "ip ") {
+			hasIP = true
+		} else {
+			nftCmds = append(nftCmds, c)
+		}
+	}
+	var problems []string
 	if ok {
+		if missing := nftMissing(listing, plan.Setup); len(missing) > 0 {
+			problems = append(problems, "the nftables table \"inet splitter\" was written for another plan (it lacks "+strings.Join(missing, ", ")+
+				"; the uplink or the tunnel address changed)")
+		}
+	} else if len(nftCmds) > 0 {
+		problems = append(problems, "the nftables table \"inet splitter\" does not exist")
+	}
+	if len(problems) == 0 {
+		nftCmds = nil
+	}
+	if hasIP && a.d.ipRuleList != nil {
+		rules, err := a.d.ipRuleList(ctx)
+		switch {
+		case errors.Is(err, errors.ErrUnsupported):
+		case err != nil:
+			return fail(exitManual, "cannot check the ip rules (is ip installed?): %v", err)
+		default:
+			if ipCmds = ipRuleMissing(rules, plan.Setup); len(ipCmds) > 0 {
+				problems = append(problems, "the ip rule that sends the engine's marked packets through the main table is missing "+
+					"(without it the tunnel's policy routing, priority 9000 and above, takes them into the TUN and they never reach the uplink)")
+			}
+		}
+	}
+	if len(problems) == 0 {
 		return nil
 	}
 	var b strings.Builder
-	b.WriteString("the nftables table \"inet splitter\" does not exist. Apply these commands as root, then start again:\n")
-	for _, c := range plan.Setup {
+	b.WriteString(strings.Join(problems, "; "))
+	b.WriteString(". Apply these commands as root")
+	if len(nftCmds) > 0 && ok {
+		b.WriteString(" (they replace the old rules)")
+	}
+	b.WriteString(", then start again:\n")
+	for _, c := range append(nftCmds, ipCmds...) {
 		b.WriteString("  " + c + "\n")
 	}
 	b.WriteString("Remove the rules later with:\n")
@@ -491,12 +616,12 @@ func (a *App) checkNFT(ctx context.Context, plan desync.Plan) error {
 }
 
 func (a *App) startMonitor() {
-	live := a.liveClient()
-	m := a.d.newMonitor(a.cfg.Monitor, live, routeByTag, a.d.clk, a.failureSink())
+	watch := &watchedClash{Client: a.liveClient(), log: a.log}
+	m := a.d.newMonitor(a.cfg.Monitor, watch, routeByTag, a.d.clk, a.failureSink())
 	mctx, cancel := context.WithCancel(context.WithoutCancel(a.runContext()))
 	done := make(chan struct{})
 	a.mu.Lock()
-	a.monitor, a.monCancel, a.monDone = m, cancel, done
+	a.monitor, a.monCancel, a.monDone, a.clashWatch = m, cancel, done, watch
 	a.mu.Unlock()
 	go func() {
 		defer close(done)
@@ -519,7 +644,7 @@ func (a *App) stopMonitor() {
 		a.log.Warn("monitor did not stop in time")
 	}
 	a.mu.Lock()
-	a.monitor = nil
+	a.monitor, a.clashWatch = nil, nil
 	a.mu.Unlock()
 }
 
@@ -572,8 +697,101 @@ func (a *App) logProcEvents(ctx context.Context) {
 			} else {
 				a.log.Info("process", "name", e.Name, "state", string(e.State))
 			}
+			if e.State != procman.StateFailed {
+				continue
+			}
+			a.logProcOutput(e.Name)
+			if e.Name == nameSingBox {
+				a.singBoxFailed(ctx, e.Err)
+			} else {
+				// procman gave up on the engine: forget it, so the next reload starts it again.
+				a.mu.Lock()
+				if a.engine.name == e.Name {
+					a.engine = engineState{}
+				}
+				a.mu.Unlock()
+			}
 		}
 	}
+}
+
+// logProcOutput copies the last lines a process wrote to the app log: the
+// reason of a crash is usually only there.
+func (a *App) logProcOutput(name string) {
+	lines := a.d.procs.Logs(name)
+	if len(lines) == 0 {
+		return
+	}
+	if len(lines) > procLogTail {
+		lines = lines[len(lines)-procLogTail:]
+	}
+	a.log.Warn("process output", "name", name, "lines", ansiEscape.ReplaceAllString(strings.Join(lines, "\n"), ""))
+}
+
+// ansiEscape matches the colour codes sing-box writes even to a pipe.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
+
+// singBoxFailed reacts to procman giving up on sing-box while connected:
+// without it the app would stay "connected" with no tunnel.
+func (a *App) singBoxFailed(ctx context.Context, cause error) {
+	if err := a.op.Lock(ctx); err != nil {
+		return
+	}
+	defer a.op.Unlock()
+	if a.State() != StateConnected {
+		return // a connect in progress handles its own failure
+	}
+	for _, p := range a.d.procs.Status() {
+		if p.Name == nameSingBox && (p.State == procman.StateRunning || p.State == procman.StateStarting) {
+			return // a reload already brought it back
+		}
+	}
+	a.singBoxLostLocked(ctx, cause)
+}
+
+// singBoxLostLocked disconnects after sing-box is gone for good, so the state
+// and the status page tell the truth. In terminal mode nothing would ever
+// reconnect, so Run ends with an error. a.op must be held.
+func (a *App) singBoxLostLocked(ctx context.Context, cause error) {
+	a.log.Error("sing-box is not running; disconnecting", "err", cause)
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*stepTimeout)
+	defer cancel()
+	if err := a.disconnectLocked(dctx); err != nil {
+		a.log.Error("disconnect after the sing-box failure", "err", err)
+	}
+	if a.ui {
+		return
+	}
+	a.mu.Lock()
+	fatal := a.onFatal
+	a.mu.Unlock()
+	if fatal != nil {
+		fatal(fmt.Errorf("sing-box failed: %v", cause))
+	}
+}
+
+// resolveTunnel looks up a host-name tunnel server before the TUN is up, so
+// the desync engine can exclude its addresses. A failure is only a warning
+// here: without desync domains nothing needs the addresses, and with them
+// the desync plan refuses to build (errTunnelUnresolved). Once the TUN is up
+// the system resolver would answer with FakeIP, so the lookup is not repeated
+// until the next connect; a failed lookup keeps the previous addresses. The
+// name is not logged (it comes from the secrets).
+func (a *App) resolveTunnel(ctx context.Context) {
+	host := tunnelHost(a.outbounds.Tunnel)
+	if host == "" || a.d.lookupHost == nil {
+		return
+	}
+	lctx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	addrs, err := a.d.lookupHost(lctx, host)
+	if err != nil || len(addrs) == 0 {
+		a.log.Warn("could not resolve the tunnel server; the desync engine will not start until a connect resolves it")
+		return
+	}
+	a.mu.Lock()
+	a.tunnelAddrs = addrs
+	a.mu.Unlock()
 }
 
 // resolveBinaries finds sing-box and, when needed, the desync engine.
@@ -644,11 +862,11 @@ func (a *App) rememberEngine(plan desync.Plan) {
 		files[k] = string(v)
 	}
 	a.mu.Lock()
-	a.engine = engineState{running: true, name: string(plan.Engine), args: strings.Join(plan.Args, "\x00"), files: files}
+	a.engine = engineState{running: true, name: string(plan.Engine), args: strings.Join(plan.Args, "\x00"), files: files, setup: strings.Join(plan.Setup, "\n")}
 	a.mu.Unlock()
 }
 
-// writePlanFiles writes the engine's files (the hostlist) into the Run directory.
+// writePlanFiles writes the engine's files (the hostlist) into the Run directory, owner-only.
 func (a *App) writePlanFiles(plan desync.Plan) error {
 	for name, data := range plan.Files {
 		if !plainFileName(name) {

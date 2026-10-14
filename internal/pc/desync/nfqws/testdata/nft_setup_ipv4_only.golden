@@ -1,6 +1,8 @@
 nft add table inet splitter
+nft flush table inet splitter
 nft 'add chain inet splitter postrouting { type filter hook postrouting priority 101; }'
 nft 'add rule inet splitter postrouting ip daddr { 203.0.113.0/24 } return'
 nft 'add rule inet splitter postrouting oifname "eth0" tcp dport { 443, 8443 } meta mark and 0x20000000 == 0 ct original packets 1-12 queue num 300 bypass'
 nft 'add chain inet splitter output { type filter hook output priority -401; }'
 nft 'add rule inet splitter output meta mark and 0x20000000 != 0 notrack'
+ip rule add fwmark 0x20000000/0x20000000 lookup main priority 8999
