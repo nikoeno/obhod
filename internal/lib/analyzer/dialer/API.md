@@ -50,7 +50,8 @@ func NewFake(r route.Route, steps ...Step) Dialer
 
 - Setup failures (no uplink, bind not permitted) are returned wrapped with `verdict.Local`, so classify maps them to `LOCAL_ERROR`.
 - Network failures (RST, timeout) are returned unwrapped, as the OS gives them.
-- The dialer holds no state across dials, except the resolved uplink.
+- The `NewDirect` dialer holds no state across dials, except the resolved uplink (fixed at construction).
+- `NewFollowing` is for long-lived users (DoH): it resolves the uplink on the first dial, trusts it for `UplinkTTL`, re-resolves after a failed dial (retrying once if the interface changed) and rebuilds the pinned dialer when the interface changes, closing connections opened through the old one so a pooled connection on a dead interface is not reused. Sockets are always bound via `netif.BindControl`.
 
 ## Config
 

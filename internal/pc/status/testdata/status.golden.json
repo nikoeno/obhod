@@ -1,0 +1,40 @@
+{
+  "Version": "splitter 1.2.3",
+  "State": "connected",
+  "Network": "AS12389 Rostelecom",
+  "LastCheck": "2026-10-01T12:00:00Z",
+  "NextCheck": "2026-10-01T12:30:00Z",
+  "Routes": {
+    "desync": 3,
+    "direct": 40,
+    "tunnel": 7
+  },
+  "Traffic": {
+    "direct": 9000,
+    "tunnel": 1000
+  },
+  "Savings": 0.9,
+  "Processes": [
+    {
+      "Name": "sing-box",
+      "State": "running",
+      "Restarts": 0
+    },
+    {
+      "Name": "winws2",
+      "State": "running",
+      "Restarts": 1
+    }
+  ],
+  "Warnings": [
+    "probe port blocked"
+  ],
+  "Recent": [
+    {
+      "Domain": "example.org",
+      "From": "tunnel",
+      "To": "desync",
+      "At": "2026-10-01T12:00:00Z"
+    }
+  ]
+}

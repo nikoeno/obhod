@@ -1,0 +1,6 @@
+# Fake ISP A: the client's first uplink. Scenarios add fakedpi rules with Lab.SetRules.
+name: ispa
+asn: 64500
+rules: []
+poisoned:
+  poisoned.test: 192.0.2.10   # TEST-NET-1 stub, nothing listens there

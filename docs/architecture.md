@@ -44,6 +44,7 @@ The architecture rules (module shape, placement, import rules a-e, API.md header
     - `internal/router/podkop`: renders podkop-format domain lists from a RouteTable and triggers a podkop reload
 - `lab`: runs end-to-end scenarios in Linux network namespaces with a fake TSPU
   - `lab/fakeasn`: serves fake public-IP echo and Cymru-style ASN answers for the lab
+  - `lab/fakedns`: serves the lab's DoH and plain DNS with a static zone, poisoning and a query log
   - `lab/fakedpi`: emulates TSPU-like blocking on packets via NFQUEUE inside a lab namespace
   - `lab/netns`: creates and tears down network namespaces, veth links and routes for the lab
 
@@ -52,7 +53,7 @@ The architecture rules (module shape, placement, import rules a-e, API.md header
 | Path | Kind | Consumers | Children | Status |
 |---|---|---|---|---|
 | `internal/blockanalyzer` | app | cmd/blockanalyzer | – | design ready (see internal/lib/analyzer/AGENTS.md) |
-| `internal/lib/analyzer` | lib | internal/blockanalyzer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/netwatch, internal/pc, internal/pc/monitor, internal/router, lab/fakeasn | internal/lib/analyzer/classify, internal/lib/analyzer/dnscheck, internal/lib/analyzer/dialer, internal/lib/analyzer/lib/verdict | design ready (see DESIGN.md, AGENTS.md) |
+| `internal/lib/analyzer` | lib | internal/blockanalyzer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/netwatch, internal/pc, internal/pc/monitor, internal/router, lab, lab/fakeasn | internal/lib/analyzer/classify, internal/lib/analyzer/dnscheck, internal/lib/analyzer/dialer, internal/lib/analyzer/lib/verdict | design ready (see DESIGN.md, AGENTS.md) |
 | `internal/lib/analyzer/classify` | child | internal/lib/analyzer | – | design ready |
 | `internal/lib/analyzer/dialer` | child | internal/lib/analyzer | – | design ready (direct only) |
 | `internal/lib/analyzer/dnscheck` | child | internal/lib/analyzer | – | design ready |
@@ -65,28 +66,29 @@ The architecture rules (module shape, placement, import rules a-e, API.md header
 | `internal/lib/checker/schedule` | child | internal/lib/checker | – | implemented |
 | `internal/lib/checker/store` | child | internal/lib/checker | – | implemented |
 | `internal/lib/clock` | lib | internal/lib/analyzer, internal/lib/checker, internal/lib/checker/netwatch, internal/lib/checker/schedule, internal/lib/checker/store, internal/pc, internal/pc/monitor, internal/pc/procman, internal/router | – | planned |
-| `internal/lib/faultserver` | test-only | internal/lib/analyzer, lab | – | planned |
-| `internal/lib/netif` | lib | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc/desync | – | planned |
+| `internal/lib/faultserver` | test-only | internal/lib/analyzer, lab | – | implemented (M3, lab L2) |
+| `internal/lib/netif` | lib | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc, internal/pc/desync | – | planned |
 | `internal/lib/paths` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
-| `internal/lib/proc` | lib | internal/lib/analyzer, internal/pc/procman | – | planned |
-| `internal/lib/route` | lib | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop | – | planned |
+| `internal/lib/proc` | lib | internal/lib/analyzer, internal/pc, internal/pc/procman | – | planned |
+| `internal/lib/route` | lib | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop, lab | – | planned |
 | `internal/lib/testca` | test-only | internal/lib/analyzer, internal/lib/faultserver, lab | – | planned |
 | `internal/lib/version` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
-| `internal/pc` | app | cmd/splitter | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/lib/clashapi | planned |
-| `internal/pc/desync` | child | internal/pc | internal/pc/desync/winws, internal/pc/desync/nfqws | planned |
-| `internal/pc/desync/nfqws` | child | internal/pc/desync | – | planned |
-| `internal/pc/desync/winws` | child | internal/pc/desync | – | planned |
-| `internal/pc/lib/clashapi` | lib | internal/pc, internal/pc/monitor, internal/pc/status | – | planned |
-| `internal/pc/monitor` | child | internal/pc | – | planned |
-| `internal/pc/procman` | child | internal/pc | – | planned |
-| `internal/pc/singbox` | child | internal/pc | – | planned |
-| `internal/pc/status` | child | internal/pc | – | planned |
+| `internal/pc` | app | cmd/splitter | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/lib/clashapi | implemented |
+| `internal/pc/desync` | child | internal/pc | internal/pc/desync/winws, internal/pc/desync/nfqws | implemented |
+| `internal/pc/desync/nfqws` | child | internal/pc/desync | – | implemented |
+| `internal/pc/desync/winws` | child | internal/pc/desync | – | implemented |
+| `internal/pc/lib/clashapi` | lib | internal/pc, internal/pc/monitor, internal/pc/status | – | implemented |
+| `internal/pc/monitor` | child | internal/pc | – | implemented |
+| `internal/pc/procman` | child | internal/pc | – | implemented |
+| `internal/pc/singbox` | child | internal/pc | – | implemented |
+| `internal/pc/status` | child | internal/pc | – | implemented |
 | `internal/router` | app | cmd/splitter-router | internal/router/podkop | planned |
 | `internal/router/podkop` | child | internal/router | – | planned |
-| `lab` | lab | – (go test only) | lab/netns, lab/fakedpi, lab/fakeasn | planned |
-| `lab/fakeasn` | lab | lab | – | planned |
-| `lab/fakedpi` | lab | lab | – | planned |
-| `lab/netns` | lab | lab | – | planned |
+| `lab` | lab | – (go test only) | lab/netns, lab/fakedpi, lab/fakeasn, lab/fakedns | implemented (lab/PLAN.md) |
+| `lab/fakeasn` | lab | lab | – | implemented (lab L3) |
+| `lab/fakedns` | lab | lab | – | implemented (lab L3) |
+| `lab/fakedpi` | lab | lab | – | implemented (lab L4a, L4b) |
+| `lab/netns` | lab | lab | – | implemented (lab L1) |
 
 ## 5. Binaries
 

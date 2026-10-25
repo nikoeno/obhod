@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -221,6 +222,51 @@ func TestExitCodes(t *testing.T) {
 	h.runner.err = context.Canceled
 	if code, out, errs := h.run("a.test"); code != exitUsage || !strings.Contains(out, "example.com") || !strings.Contains(errs, "interrupted") {
 		t.Errorf("interrupted: %d %q %q", code, out, errs)
+	}
+}
+
+func TestNoUplinkIsCalibrationFailed(t *testing.T) {
+	noUplink := func() (analyzer.Dialer, error) {
+		return nil, fmt.Errorf("%w: netif: no physical uplink found", errNoUplink)
+	}
+	h := newHarness(sample())
+	h.app.newDialer = noUplink
+	code, out, errs := h.run("--json", "-", "a.test")
+	if code != exitCalibration || h.runner.calls != 0 || !strings.Contains(errs, "network is down") {
+		t.Fatalf("%d %q calls=%d", code, errs, h.runner.calls)
+	}
+	rep, err := analyzer.DecodeReport(strings.NewReader(out))
+	if err != nil {
+		t.Fatalf("stdout is not a schema-1 report: %v\n%s", err, out)
+	}
+	if rep.Schema != 1 || rep.Calibration.Internet != analyzer.CheckFailed || len(rep.Results) != 0 {
+		t.Fatalf("%+v", rep)
+	}
+	if strings.Contains(out, "suggest") {
+		t.Fatalf("report has suggestions: %s", out)
+	}
+
+	// Table mode and a JSON file work too.
+	path := filepath.Join(t.TempDir(), "r.json")
+	h.app.newDialer = noUplink
+	code, out, _ = h.run("--json", path, "a.test")
+	if code != exitCalibration || !strings.Contains(out, "internet=failed") {
+		t.Fatalf("%d %q", code, out)
+	}
+	if b, err := os.ReadFile(path); err != nil {
+		t.Fatal(err)
+	} else if rep, err := analyzer.DecodeReport(bytes.NewReader(b)); err != nil || rep.Calibration.Internet != analyzer.CheckFailed {
+		t.Fatalf("%v %+v", err, rep)
+	}
+
+	// Any other dialer failure, and a bad config, still exit 1.
+	h.app.newDialer = func() (analyzer.Dialer, error) { return nil, errors.New("boom") }
+	if code, _, errs := h.run("a.test"); code != exitUsage || !strings.Contains(errs, "boom") {
+		t.Errorf("other dialer error: %d %q", code, errs)
+	}
+	h.app.newDialer = noUplink
+	if code, _, _ := h.run("--stages", "udp", "a.test"); code != exitUsage {
+		t.Errorf("bad config with no uplink: %d", code)
 	}
 }
 

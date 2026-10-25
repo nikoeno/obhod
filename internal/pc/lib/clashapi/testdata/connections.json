@@ -1,0 +1,41 @@
+{
+  "downloadTotal": 123456,
+  "uploadTotal": 7890,
+  "memory": 0,
+  "connections": [
+    {
+      "id": "6b1c0c0e-6c3a-4c4e-9a53-0d5b4d7f0001",
+      "metadata": {
+        "network": "tcp",
+        "type": "tun/tun-in",
+        "sourceIP": "172.19.0.1",
+        "destinationIP": "142.250.74.14",
+        "sourcePort": "51234",
+        "destinationPort": "443",
+        "host": "example.com",
+        "dnsMode": "normal",
+        "processPath": "C:\\Program Files\\Browser\\browser.exe"
+      },
+      "upload": 1200,
+      "download": 98000,
+      "start": "2026-10-01T12:00:00.123456789+03:00",
+      "chains": ["tunnel"],
+      "rule": "rule_set=tunnel => route(tunnel)",
+      "rulePayload": ""
+    },
+    {
+      "id": "6b1c0c0e-6c3a-4c4e-9a53-0d5b4d7f0002",
+      "metadata": {
+        "network": "udp",
+        "destinationIP": "1.1.1.1",
+        "destinationPort": "53",
+        "host": ""
+      },
+      "upload": 10,
+      "download": 20,
+      "start": "2026-10-01T09:00:01Z",
+      "chains": ["direct"],
+      "rule": "final"
+    }
+  ]
+}

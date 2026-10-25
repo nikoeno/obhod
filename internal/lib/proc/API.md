@@ -6,7 +6,7 @@
 | Kind | lib |
 | Binary | – |
 | Purpose | lists and finds running processes per OS |
-| Consumers | internal/lib/analyzer, internal/pc/procman |
+| Consumers | internal/lib/analyzer, internal/pc, internal/pc/procman |
 | Children | – |
 | Uses libs | – |
 | Build tags | – |

@@ -152,6 +152,13 @@ func New(cfg Config, deps Deps) (*Checker, error) {
 	return c, nil
 }
 
+// Validate reports the config errors New would report, without loading the
+// lists or opening the store.
+func (cfg Config) Validate() error {
+	_, err := cfg.normalize()
+	return err
+}
+
 func (cfg Config) normalize() (Config, error) {
 	if cfg.UnknownDefault == "" {
 		cfg.UnknownDefault = route.Tunnel

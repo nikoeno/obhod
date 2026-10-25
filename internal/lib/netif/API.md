@@ -6,7 +6,7 @@
 | Kind | lib |
 | Binary | – |
 | Purpose | finds the physical uplink interface and binds sockets to it, bypassing TUN adapters |
-| Consumers | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc/desync |
+| Consumers | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc, internal/pc/desync |
 | Children | – |
 | Uses libs | internal/lib/clock |
 | Build tags | – |
@@ -54,7 +54,7 @@ func Watch(ctx context.Context) (<-chan Event, error)
 
 ## Behavior / contract
 
-- Virtual detection: by adapter type/driver on Windows (wintun, TAP), and by `/sys/class/net/<if>` type plus name heuristics (`tun*`, `wg*`, `sing*`) on Linux.
+- Virtual detection: loopback is always virtual. Windows: the `HardwareInterface` flag of `GetIfEntry2` (`MIB_IF_ROW2`, loaded from `iphlpapi.dll`) is final: Wintun, TAP, Hyper-V, Wi-Fi Direct, Bluetooth PAN and other software adapters are virtual whatever their name, and a physical adapter whose name contains a fragment such as `tun` stays physical. One exception: the Hyper-V host adapter (description `Hyper-V Virtual Ethernet Adapter`, shown as `vEthernet (...)`) counts as physical, because with an external virtual switch it carries the real uplink. Linux: `/sys/class/net/<if>/tun_flags` (TUN/TAP) or link type 65534 (TUN, WireGuard) or 772 (loopback) mark an adapter virtual; the name heuristic (`tun`, `wg`, `sing`, `veth`, `docker`, ...) is added on top; bridges count as physical. Other OSes, or when the OS call fails: the name heuristic alone. This keeps the app's own TUN (default name `splitter`) from being taken as the uplink.
 - `Uplink` fills Gateway (default IPv4 route) and, on Linux, GatewayMAC (from the ARP table); SSID is best effort and currently always "". Windows: Gateway only (GetAdaptersInfo). Other OSes: empty.
 - `Watch` polls every 2 s (snapshot of uplink name/index, addresses, gateway, link up); one event per poll, highest-priority change wins (LinkDown, UplinkChanged, AddressChanged). It guarantees at least one event within a few seconds of an uplink change. Consumers must debounce.
 - `SO_BINDTODEVICE` and `SO_MARK` need `CAP_NET_RAW` / `CAP_NET_ADMIN`. Without them, return `ErrPermission`; never escalate.
@@ -72,6 +72,8 @@ None (callers pass what they need).
 Pure parts (virtual detection from fixtures, route table parsing) are unit-tested. Binding is covered in the Linux lab (a socket bound to the uplink bypasses a default route via a fake TUN). The Windows part is covered by windows-smoke.
 
 ## Planned: sturdier uplink detection
+
+Step 1 below is done for Windows and Linux (see "Virtual detection" above); steps 2 and 3 are still open.
 
 Name fragments (`tun`, `meta`, `wg`, ...) are fragile: a VPN adapter can be named anything and a physical one can match by accident. Planned order of decisions, no public API change:
 

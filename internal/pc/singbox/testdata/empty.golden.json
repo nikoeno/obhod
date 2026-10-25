@@ -1,0 +1,132 @@
+{
+  "dns": {
+    "final": "dns-direct",
+    "rules": [
+      {
+        "action": "reject",
+        "query_type": [
+          "HTTPS",
+          "SVCB"
+        ]
+      },
+      {
+        "action": "route",
+        "query_type": [
+          "A",
+          "AAAA"
+        ],
+        "server": "dns-fakeip"
+      },
+      {
+        "action": "reject",
+        "invert": true,
+        "query_type": [
+          "A",
+          "AAAA"
+        ]
+      }
+    ],
+    "servers": [
+      {
+        "path": "/dns-query",
+        "server": "1.1.1.1",
+        "server_port": 443,
+        "tag": "dns-direct",
+        "type": "https"
+      },
+      {
+        "inet4_range": "198.18.0.0/16",
+        "tag": "dns-fakeip",
+        "type": "fakeip"
+      }
+    ],
+    "strategy": "ipv4_only"
+  },
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "secret": "test-secret"
+    }
+  },
+  "inbounds": [
+    {
+      "address": [
+        "198.19.0.1/30"
+      ],
+      "auto_route": true,
+      "interface_name": "splitter",
+      "route_exclude_address": [
+        "10.0.0.0/8",
+        "169.254.0.0/16",
+        "192.168.0.0/16",
+        "fc00::/7",
+        "fe80::/10"
+      ],
+      "stack": "mixed",
+      "strict_route": true,
+      "tag": "tun-in",
+      "type": "tun"
+    }
+  ],
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "outbounds": [
+    {
+      "tag": "direct",
+      "type": "direct"
+    },
+    {
+      "tag": "desync",
+      "type": "direct"
+    },
+    {
+      "flow": "xtls-rprx-vision",
+      "server": "203.0.113.7",
+      "server_port": 443,
+      "tag": "tunnel",
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "short_id": "0123456789abcdef"
+        },
+        "server_name": "example.org"
+      },
+      "type": "vless",
+      "uuid": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "default_domain_resolver": {
+      "server": "dns-direct"
+    },
+    "final": "tunnel",
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "action": "hijack-dns",
+        "protocol": "dns"
+      },
+      {
+        "action": "route",
+        "outbound": "direct",
+        "process_name": [
+          "sing-box.exe",
+          "splitter.exe",
+          "winws2.exe"
+        ]
+      },
+      {
+        "action": "reject",
+        "network": "udp",
+        "port": 443
+      }
+    ]
+  }
+}

@@ -29,4 +29,6 @@ The code is a tree of modules; each folder has an `API.md` contract, and a modul
 | `make cross` | `GOOS=linux GOARCH=arm64 go build ./...` (and windows/amd64, linux/amd64, linux/mipsle) |
 | `make fetch` | `go run ./scripts/fetch` (download + verify pinned sing-box/zapret2 into `third_party/bin/`; add `-platform all` for every platform) |
 | `make fetch-check` | `go run ./scripts/fetch -check` (verify installed binaries, no network) |
+| `make e2e` | end-to-end lab in Linux namespaces (WSL2, root): `go test -tags lab -v ./lab/...`, report in `dist/e2e/`; checklist: [docs/RELEASE.md](docs/RELEASE.md) |
+| `make lab-clean` | remove namespaces and `/etc/netns` leftovers of a crashed lab run (root) |
 | `make clean` | remove `bin/` and `dist/` |

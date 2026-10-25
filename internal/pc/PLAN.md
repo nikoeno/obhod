@@ -1,25 +1,40 @@
 # Implementation plan — pc (internal/pc)
 
-Status: everything under `internal/pc` is `planned` (M0 skeleton: `doc.go` + `API.md`; `Main` answers `--version` / `--help` only). Each module's `API.md` is the source of truth; this file only orders the work, lists the gaps found while reading the contracts, and proposes how to close them. Delete it (or fold the leftovers into a `DESIGN.md`) when `internal/pc` reaches `implemented`.
+Status: M1-M11 are done (all `internal/pc` modules are `implemented`; M11's manual part is the checklist in `SMOKE.md`). M12 (control API for the desktop UI) is open and blocked on the G15 decision and an approved contract. Each module's `API.md` is the source of truth; this file keeps the order of the work, the contract gaps and how each was closed. Delete it (or fold the leftovers into a `DESIGN.md`) when M12 is done.
 
 ## 0. Starting point
 
 | Module | State | Needs |
 |---|---|---|
-| `internal/pc` (root, `splitter`) | M0 | all children below |
-| `internal/pc/singbox` | M0 | `route` |
-| `internal/pc/lib/clashapi` | M0 | – |
-| `internal/pc/procman` | M0 | `proc`, `clock` |
-| `internal/pc/desync` | M0 | `route`, `netif`, children |
-| `internal/pc/desync/winws` | M0 | – |
-| `internal/pc/desync/nfqws` | M0 | – |
-| `internal/pc/monitor` | M0 | `clashapi`, `analyzer`, `route`, `clock` |
-| `internal/pc/status` | M0 | `clashapi`, `route` |
+| `internal/pc` (root, `splitter`) | implemented (M9, M10); M12 open | all children below |
+| `internal/pc/singbox` | implemented (M1) | `route` |
+| `internal/pc/lib/clashapi` | implemented (M2) | – |
+| `internal/pc/procman` | implemented (M3) | `proc`, `clock` |
+| `internal/pc/desync` | implemented (M6) | `route`, `netif`, children |
+| `internal/pc/desync/winws` | implemented (M4) | – |
+| `internal/pc/desync/nfqws` | implemented (M5) | – |
+| `internal/pc/monitor` | implemented (M7) | `clashapi`, `analyzer`, `route`, `clock` |
+| `internal/pc/status` | implemented (M8) | `clashapi`, `route` |
 | `internal/lib/checker`, `analyzer`, `route`, `netif`, `proc`, `clock`, `paths`, `version` | implemented | – |
 
 Every library the pc tree needs already exists, so the work goes bottom-up with no stubs outside `internal/pc`.
 
 **Pinned versions (done 2026-10-01):** sing-box 1.14.2 and zapret2 1.0.5.2 (winws2, nfqws2, Lua libraries) in `third_party/manifest.yaml`, files in `third_party/bin/<os>-<arch>/`. The renderers are verified against exactly these versions.
+
+## 0a. Progress and deviations
+
+Done 2026-10-01: M1 singbox, M2 clashapi, M3 procman, M4 winws, M5 nfqws, M6 desync, M7 monitor, M8 status, M9 config + CLI, M10 App, M11 integration test + `SMOKE.md`.
+
+Deviations from the milestone text (all recorded in the modules' `API.md`):
+
+- **Tested on Windows only.** Linux code (`attr_linux.go`, nft check, the SIGTERM path, Pdeathsig) compiles for linux/amd64, arm64 and mipsle and its tests are written, but they have not been run on Linux.
+- **Public API additions:** `procman.Config.BinDir` (needed by `CleanupStale`), `pc.Config.Secrets` and `PathsConfig`, `pc.New(..., opts ...Option)`, `App.Connect/Disconnect/State`, `desync.ErrVirtualUplink`, `winws.Filter`, and the `yaml` tags on the children's `Config` types. `singbox.TUNConfig` and `DNSConfig` were undefined in the contract and now are (one `DirectDoH` server, not a list).
+- **sing-box needs a non-fakeip default DNS server**, so FakeIP is selected by query type (A/AAAA); HTTPS/SVCB queries for non-direct domains are rejected. Verified with the pinned `sing-box check`.
+- **WinDivert has no CIDR**, so exclude prefixes become address ranges. **nftables** excludes are early `return` rules, because `ip daddr != X` inside the queue rule would exclude all IPv6 traffic.
+- **M10 test claim "a change that touches only desync domains restarts only the engine" does not hold**: moving a domain to or from `desync` changes the sing-box rules too (the `desync` outbound is a separate tag, G5). Both processes restart, the engine first; a change that does not touch `desync` restarts sing-box only. Tested as such.
+- **Checker probes after an uplink change:** the checker's direct dialer (`lazyDirect`, `direct.go`) re-resolves `netif.Uplink` when its cached binding is older than 2 s, after the uplink watcher fires, and after any failed dial (retried once if the uplink changed), so a switch needs no further event.
+- **winws2.exe needs elevation even for `--help`**, so the flag check reads the binary's strings; `nfqws2` is packed (no strings), so `--fwmark` is unverified (it is only emitted for a non-default mark).
+- The monitor logs nothing and reads no JSON fixtures: its snapshot sequences are built in Go in the tests.
 
 ## 1. Milestones
 
@@ -202,7 +217,7 @@ Decided 2026-10-01. The API changes are already recorded in the modules' `API.md
 | G3 | procman | Windows: children must die with the parent; the Job Object API is not in the stdlib | **Decided:** Job Object with `KILL_ON_JOB_CLOSE`, Win32 calls loaded from `kernel32.dll` via `syscall.NewLazyDLL`; no new dependency. The short gap between start and job assignment is accepted (our children do not fork early) |
 | G4 | procman | Linux `Pdeathsig` fires when the *thread* that started the child exits, not the process | **Decided:** start every child from one goroutine pinned with `runtime.LockOSThread` that lives as long as the manager |
 | G5 | singbox / monitor | `direct` and `desync` shared one outbound, so connections could not be told apart | **Decided:** separate `desync` outbound (also a direct outbound); `RouteOf` maps by the outbound tag |
-| G6 | singbox | the final (default) route has no config field | **Open:** to be filled later |
+| G6 | singbox | the final (default) route has no config field | **Open:** `final` is always `tunnel`; `pc.Config.Validate` requires `checker.unknowndefault` to be empty or `tunnel` to match |
 | G7 | singbox / pc | where the Clash API secret comes from | **Decided:** internal; the app generates a random secret at each start, writes it only into the 0600 generated config and its own client; not configurable, never logged |
 | G8 | pc / nfqws | what `run` does when the nftables rules were not applied | **Decided:** `run` checks read-only for the `inet splitter` table; if missing, it refuses to start, prints the `Setup` (and `Teardown`) commands and exits 2 |
 
@@ -225,6 +240,12 @@ Desktop UI (ADR 0003):
 | G16 | pc | a disconnected state (checker running, sing-box/desync stopped) | **Decided:** in M10; `run` connects at once, `run --ui` starts disconnected. Update `internal/pc/API.md` (CLI and startup order) in M10 |
 | G17 | pc | an elevated `splitter` started by the UI must die with the UI | **Decided (v1):** `--parent-pid`; when a service replaces the UAC launch, this goes away |
 | G18 | pc / control | token handoff between the UI and `splitter` | **Proposed:** `--token-file` written by the UI in its per-user directory; never on the command line itself (other processes can read command lines) |
+
+DNS reject notification (from D1, `docs/REVIEW-DECIDE.md`):
+
+| # | Module | Item | State |
+|---|---|---|---|
+| G19 | singbox / procman / status | tell the client when a non-A/AAAA DNS query (TXT, MX, ...) of a non-direct domain was rejected. The reject itself is done and configurable (`dns.allow_other_query_types`, default false = reject). sing-box logs a reject only at `debug`: `dns: exchange <name>. IN TXT`, then `dns: match[n] !(query_type=[A AAAA]) => reject`, joined by the connection id (verified on sing-box 1.14.2). At `info` nothing is logged | **Planned, not started.** Needs: a streaming line tap in `procman` (the 200-line ring buffer loses lines at debug; `procman/API.md` says output is never parsed for decisions, so this changes that rule), a small parser for the two lines, a rejected-query counter in the status `Snapshot` / an `Event` (API change: ask, update `API.md`), a slog line with the query type and the hostname only when the app's debug is on. Open: sing-box must run at `debug` (it logs every hostname, so write it only to a 0600 file or keep it in memory) or use a local DNS sink in the app instead. Decide when the UI needs it (M12) |
 
 ## 3. Not in this plan
 

@@ -1,0 +1,4 @@
+# Fake ISP B: the second uplink, no fake TSPU rules and an honest resolver.
+name: ispb
+asn: 64501
+rules: []

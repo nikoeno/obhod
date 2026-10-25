@@ -561,3 +561,17 @@ func TestCheckNowIgnoresInvalidDomains(t *testing.T) {
 	x.c.CheckNow("not a domain", "http://x")
 	x.noCall(t)
 }
+
+func TestConfigValidate(t *testing.T) {
+	if err := (Config{}).Validate(); err != nil {
+		t.Fatalf("zero config: %v", err)
+	}
+	for name, c := range map[string]Config{
+		"block default": {UnknownDefault: route.Block},
+		"negative keep": {Retention: -1},
+	} {
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}

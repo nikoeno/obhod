@@ -13,7 +13,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -89,6 +88,19 @@ type prober struct {
 // NewProber returns a Prober. It fails only on an invalid config.
 func NewProber(cfg Config, deps Deps) (Prober, error) { return newProber(cfg, deps) }
 
+// NewDoHResolver builds the DoH resolver for cfg.DoH (with cfg.Options.Fingerprint) that reaches the
+// endpoints through d.DialContext. A caller outside the analyzer (e.g. the checker's network
+// identification) passes its direct dialer here, so the lookups bypass a TUN client.
+func NewDoHResolver(cfg Config, d Dialer) (Resolver, error) {
+	if len(cfg.DoH) == 0 {
+		return nil, errors.New("analyzer: no DoH endpoints in config")
+	}
+	if d == nil {
+		return nil, errors.New("analyzer: nil dialer")
+	}
+	return dnscheck.NewDoH(cfg.DoH, d.DialContext, cfg.Options.Fingerprint)
+}
+
 func newProber(cfg Config, deps Deps) (*prober, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -107,19 +119,11 @@ func newProber(cfg Config, deps Deps) (*prober, error) {
 	return p, nil
 }
 
-// dohDial dials DoH endpoints straight from the uplink (bypassing a TUN client). The dialer is created on
-// first use, so constructing a prober never needs an uplink.
+// dohDial dials DoH endpoints straight from the uplink (bypassing a TUN client). The dialer resolves the uplink
+// on first use and then follows it (dialer.NewFollowing), so constructing a prober never needs an uplink and a
+// switch of uplink is picked up without any event.
 func (p *prober) dohDial() dnscheck.DialFunc {
-	var once sync.Once
-	var d Dialer
-	var derr error
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		once.Do(func() { d, derr = NewDirectDialer(dialer.DirectOptions{BindIface: true}) })
-		if derr != nil {
-			return nil, derr
-		}
-		return d.DialContext(ctx, network, addr)
-	}
+	return dialer.NewFollowing(p.clk.Now).DialContext
 }
 
 // Classify maps a connection failure seen elsewhere (e.g. the live monitor) to a verdict.

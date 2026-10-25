@@ -23,6 +23,7 @@ Rules for AI agents in this repo (traffic-splitter). Module details live in each
 
 - Never install or trust root certificates on a real system; never MITM user traffic.
 - Never run commands needing admin/root or change system DNS, proxy, firewall, routes or services; print the exact command for the human.
+  - Exception (granted by the human 2026-10-11): in the WSL2 distro `Ubuntu` on the developer's machine, agents may run as root only what the lab needs: the one-time setup (`apt-get install nftables`, `modprobe nfnetlink_queue nft_queue tun`) and lab tests that create and remove their own prefixed namespaces. Check every WSL command twice before running it. Never change the WSL root namespace's routes, DNS or firewall, never enable services, never delete files outside the lab's temp dirs, and never touch Windows.
 - Never hardcode or commit secrets, server addresses or credentials.
 - Logs, decisions and reports stay local. No telemetry.
 - Probe politely: low concurrency, jitter. Never target censorship infrastructure.
@@ -39,7 +40,7 @@ Rules for AI agents in this repo (traffic-splitter). Module details live in each
 
 ## Dependencies
 
-Approved Go modules: `github.com/refraction-networking/utls`, `github.com/miekg/dns`, `gopkg.in/yaml.v3`. Others: ask. Do not upgrade pinned versions unless asked.
+Approved Go modules: `github.com/refraction-networking/utls`, `github.com/miekg/dns`, `gopkg.in/yaml.v3`, and `github.com/florianl/go-nfqueue/v2` (lab only: `lab/fakedpi`). Others: ask. Do not upgrade pinned versions unless asked.
 
 Never weaken `arch_test.go` to make a change pass.
 

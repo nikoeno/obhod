@@ -10,7 +10,7 @@
 | Children | – |
 | Uses libs | – |
 | Build tags | – |
-| Status | planned |
+| Status | implemented |
 
 ## Responsibility
 
@@ -54,6 +54,7 @@ func NewFake(snapshots ...Snapshot) Client // returns snapshots in order, then r
 ## Behavior / contract
 
 - Uses `Authorization: Bearer <secret>`. The secret is never logged.
+- A connection whose `start` cannot be parsed (RFC 3339) gets a zero `Start`; the rest of the snapshot is unaffected.
 - JSON field mapping must be verified against the **pinned sing-box version**.
 
 ## Config
@@ -68,10 +69,16 @@ HTTP errors wrap status and endpoint.
 
 `httptest` with recorded JSON fixtures.
 
+## Notes
+
+- `New` with a nil `*http.Client` uses a 5 s timeout and no proxy. `Snapshot.At` is the local receive time.
+- `NewFake` also answers `Version` with `clashapi.FakeVersion`.
+- Fixtures in `testdata/` follow the Clash wire format of sing-box 1.14.2 (hand-written; re-record against the pinned binary when convenient).
+
 ## Out of scope
 
 Modifying sing-box state via the API.
 
 ## Bootstrap (M0)
 
-`doc.go` only.
+`doc.go` only. (Implemented in M2.)
