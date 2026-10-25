@@ -20,14 +20,14 @@ sudo apt-get install nftables curl iproute2 make    # gcc is optional
 The NFQUEUE modules are not persistent: WSL2 forgets them after an idle shutdown or a restart. Run this right before `make e2e`:
 
 ```bash
-sudo modprobe nfnetlink_queue nft_queue tun
+for m in nfnetlink_queue nft_queue tun; do sudo modprobe $m; done
 ```
 
 ## 2. Steps
 
 1. `make fetch`: downloads and verifies the pinned third-party binaries, see [HUMAN-third-party.md](HUMAN-third-party.md). Run it in WSL2 so `third_party/bin/linux-amd64/` is filled.
 2. `make build`: `make e2e` also runs it, so the lab tests the binaries in `bin/`.
-3. In WSL2: `sudo modprobe nfnetlink_queue nft_queue tun`, then `sudo -E env "PATH=$PATH" make e2e`. It takes about 10 minutes. `make e2e` refuses to run off Linux, and prints this command when it is not root (it never calls sudo itself).
+3. In WSL2: `for m in nfnetlink_queue nft_queue tun; do sudo modprobe $m; done`, then `sudo -E env "PATH=$PATH" make e2e`. It takes about 10 minutes. `make e2e` refuses to run off Linux, and prints this command when it is not root (it never calls sudo itself).
 4. On the Windows host: the "Windows" part of [internal/pc/SMOKE.md](../internal/pc/SMOKE.md) (WinDivert and the real adapter are not in the lab).
 5. Attach `dist/e2e/<version>-<date>/report.md` to the release. `make e2e` prints its path at the end. Keep the whole folder: it has the process logs.
 
@@ -65,7 +65,7 @@ The next `make e2e` also removes leftovers of crashed runs at its start. For the
 
 | Symptom | Look at |
 |---|---|
-| Tests skip with `lab preflight: missing ...` | Run the `fix:` commands from the message. After a WSL restart: `sudo modprobe nfnetlink_queue nft_queue tun`. |
+| Tests skip with `lab preflight: missing ...` | Run the `fix:` commands from the message. After a WSL restart: `for m in nfnetlink_queue nft_queue tun; do sudo modprobe $m; done`. |
 | `nfqws2` exits with status 1 | `nfqws2-debug.log` and `splitter-N.log` in the test folder: usually a wrong queue number or nft rule, or the NFQUEUE modules are gone. |
 | Desync cases stall or time out | `ip rule show` in the client namespace must have `8999: from all fwmark 0x40000000/0x40000000 lookup main`; without it the engine's packets loop into the TUN. |
 | The checker never identifies the network | The lab's ASN echo and DoH servers: see `TestHarness` (echo, DoH, Cymru TXT) and the DoH lines in `splitter-N.log`. |

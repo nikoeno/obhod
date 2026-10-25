@@ -43,7 +43,7 @@ clean:
 	rm -rf bin dist
 
 # End-to-end lab in Linux network namespaces (WSL2 or Linux, root). See docs/RELEASE.md.
-# The human runs: sudo modprobe nfnetlink_queue nft_queue   (not persistent in WSL2), then this target.
+# The human runs: for m in nfnetlink_queue nft_queue tun; do sudo modprobe $m; done   (one module per call; not persistent in WSL2), then this target.
 e2e:
 	@if [ "$$(uname -s)" != "Linux" ]; then echo "make e2e: needs Linux (WSL2 on Windows); see docs/RELEASE.md" >&2; exit 1; fi
 	@if [ "$$(id -u)" != "0" ]; then echo 'make e2e: needs root. Run: sudo -E env "PATH=$$PATH" make e2e' >&2; exit 1; fi

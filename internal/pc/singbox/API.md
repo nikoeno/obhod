@@ -42,6 +42,7 @@ type TUNConfig struct {
 type DNSConfig struct {
     DirectDoH   string // IP or https URL with an IP host (no bootstrap resolver); required
     FakeIPRange string // IPv4 prefix; default 198.18.0.0/16
+    AllowOtherQueryTypes bool // yaml allow_other_query_types; default false. true sends non-A/AAAA queries of non-direct domains to DirectDoH and LEAKS the name
 }
 
 // Tags of the generated outbounds; the last element of a Clash API chain is one of them.
@@ -81,7 +82,7 @@ Route mapping:
 - Field names and options must be verified against the **pinned sing-box version** docs, and every generated config must pass `sing-box check` in CI when the binary is available.
 
 - Generated for sing-box 1.14.2 (verified with `sing-box check`): the legacy-free DNS format (`type: https` / `fakeip` servers), rule actions (`sniff`, `hijack-dns`, `route`, `reject`), `route.default_domain_resolver`, `process_name` for own processes (on Windows pass the base name with `.exe`).
-- DNS: domains routed direct or desync resolve through `DirectDoH` (rules ordered by nesting level like the route rules; a tunnel/proxy/block entry below a direct/desync parent gets its own HTTPS/SVCB reject and A/AAAA FakeIP rules ahead of the parent); HTTPS/SVCB queries for everything else are rejected (they would leak the name); A/AAAA go to FakeIP, so tunnel/proxy domains resolve at the remote end. sing-box does not allow a fakeip default server, hence the rules by query type; the default server is `DirectDoH`.
+- DNS: domains routed direct or desync resolve through `DirectDoH` (rules ordered by nesting level like the route rules; a tunnel/proxy/block entry below a direct/desync parent gets its own HTTPS/SVCB reject and A/AAAA FakeIP rules ahead of the parent); HTTPS/SVCB queries for everything else are rejected (they would leak the name); A/AAAA go to FakeIP. By default every other query type (TXT, MX, NS, SRV, CAA, ...) of a non-direct domain is rejected too (sing-box answers REFUSED): after the A/AAAA FakeIP rule comes `{"query_type":["A","AAAA"],"invert":true,"action":"reject"}`, and for a tunnel/proxy/block entry below a direct/desync parent a `{"domain_suffix":[...],"action":"reject"}` right after its A/AAAA rule (`invert` negates the whole rule, so it cannot be combined with `domain_suffix` there). Direct/desync domains keep all types on `DirectDoH`. `DNS.AllowOtherQueryTypes=true` drops these rejects (other types go to the default `DirectDoH`, leaking the name). sing-box 1.14.2 logs a rejected query only at `debug` level (`dns: exchange <name> IN <TYPE>` then `dns: match[N] !(query_type=[A AAAA]) => reject`), so tunnel/proxy domains resolve at the remote end. sing-box does not allow a fakeip default server, hence the rules by query type; the default server is `DirectDoH`.
 - The TUN excludes private ranges (10/8, 169.254/16, 192.168/16, fc00::/7, fe80::/10) so the LAN stays on the physical network. The TUN address and the FakeIP range must not overlap (the defaults do not).
 - `final` is always `tunnel` for now (G6 stays open: the final route has no config field).
 - `ClashAPI` must be a loopback `host:port` with a numeric port 1-65535; a non-loopback address is an error. An empty `ClashSecret` is an error (it would open the API to every local process).

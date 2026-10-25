@@ -57,6 +57,11 @@ type DNSConfig struct {
 	DirectDoH string `yaml:"direct_doh"`
 	// FakeIPRange is the IPv4 FakeIP range for all other domains; default 198.18.0.0/16.
 	FakeIPRange string `yaml:"fake_ip_range"`
+	// AllowOtherQueryTypes lets queries other than A/AAAA (TXT, MX, NS, SRV, CAA, ...)
+	// for domains that are not direct/desync go to the direct DoH server. That
+	// LEAKS the queried name of tunnel/proxy domains to the direct server (and the
+	// network path to it). Default false: such queries are rejected.
+	AllowOtherQueryTypes bool `yaml:"allow_other_query_types"`
 }
 
 // Config holds everything Generate needs besides the outbounds and the table.
@@ -180,6 +185,10 @@ func Generate(cfg Config, ob Outbounds, t route.Table) ([]byte, error) {
 				obj{"domain_suffix": lv.fakeBelowDirect, "query_type": []string{"HTTPS", "SVCB"}, "action": "reject"},
 				obj{"domain_suffix": lv.fakeBelowDirect, "query_type": []string{"A", "AAAA"}, "action": "route", "server": tagDNSFake},
 			)
+			if !cfg.DNS.AllowOtherQueryTypes {
+				// A/AAAA left above; every other type of these names must not reach the direct server.
+				dnsRules = append(dnsRules, obj{"domain_suffix": lv.fakeBelowDirect, "action": "reject"})
+			}
 		}
 		if both := sortedUnique(append(append([]string(nil), lv.byRoute[route.Direct]...), lv.byRoute[route.Desync]...)); len(both) > 0 {
 			dnsRules = append(dnsRules, obj{"domain_suffix": both, "action": "route", "server": tagDNSDirect})
@@ -192,6 +201,11 @@ func Generate(cfg Config, ob Outbounds, t route.Table) ([]byte, error) {
 		obj{"query_type": []string{"HTTPS", "SVCB"}, "action": "reject"},
 		obj{"query_type": []string{"A", "AAAA"}, "action": "route", "server": tagDNSFake},
 	)
+	if !cfg.DNS.AllowOtherQueryTypes {
+		// Direct and desync suffixes matched above, so this only catches names that
+		// are not direct: TXT, MX, NS, SRV, CAA, ... would leak the name.
+		dnsRules = append(dnsRules, obj{"query_type": []string{"A", "AAAA"}, "invert": true, "action": "reject"})
+	}
 
 	doc := obj{
 		"log": obj{"level": orDefault(cfg.LogLevel, defaultLogLevel), "timestamp": true},

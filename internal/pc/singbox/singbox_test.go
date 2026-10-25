@@ -86,6 +86,8 @@ func golden(t *testing.T, name string, got []byte) {
 func TestGolden(t *testing.T) {
 	noQUIC := baseConfig()
 	noQUIC.BlockQUIC = false
+	allowOther := baseConfig()
+	allowOther.DNS.AllowOtherQueryTypes = true
 	cases := []struct {
 		name string
 		cfg  Config
@@ -96,6 +98,7 @@ func TestGolden(t *testing.T) {
 		{"mixed", baseConfig(), Outbounds{Tunnel: tunnelJSON, Proxy: proxyJSON}, entries()},
 		{"proxy_unset", baseConfig(), Outbounds{Tunnel: tunnelJSON}, withoutProxy(entries())},
 		{"quic_off", noQUIC, Outbounds{Tunnel: tunnelJSON, Proxy: proxyJSON}, entries()},
+		{"allow_other_query_types", allowOther, Outbounds{Tunnel: tunnelJSON, Proxy: proxyJSON}, entries()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -292,6 +295,7 @@ func matchDNS(t *testing.T, cfgJSON []byte, domain, qtype string) string {
 			Rules []struct {
 				DomainSuffix []string `json:"domain_suffix"`
 				QueryType    []string `json:"query_type"`
+				Invert       bool     `json:"invert"`
 				Action       string   `json:"action"`
 				Server       string   `json:"server"`
 			} `json:"rules"`
@@ -307,7 +311,7 @@ func matchDNS(t *testing.T, cfgJSON []byte, domain, qtype string) string {
 		}) {
 			continue
 		}
-		if len(r.QueryType) > 0 && !slices.Contains(r.QueryType, qtype) {
+		if len(r.QueryType) > 0 && slices.Contains(r.QueryType, qtype) == r.Invert {
 			continue
 		}
 		if r.Action == "reject" {
@@ -333,31 +337,38 @@ func TestNestedEntriesFollowLongestSuffix(t *testing.T) {
 		{Domain: "t.lan.example", Route: route.Tunnel, Source: route.SourceChecked},
 	}
 	tb := table(t, es)
-	got, err := Generate(baseConfig(), Outbounds{Tunnel: tunnelJSON, Proxy: proxyJSON}, tb)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, d := range []string{
-		"example.com", "www.example.com", "cdn.example.com", "img.cdn.example.com",
-		"x.cdn.example.com", "y.x.cdn.example.com", "deep.x.cdn.example.com", "z.deep.x.cdn.example.com",
-		"ads.example", "tracker.ads.example", "ok.ads.example", "a.ok.ads.example",
-		"yt.example", "a.yt.example", "b.a.yt.example", "plain.example",
-		"lan.example", "t.lan.example", "u.t.lan.example", "unknown.example",
-	} {
-		want := string(route.Tunnel) // final
-		if e, ok := tb.Lookup(d); ok {
-			want = string(e.Route)
+	for _, allow := range []bool{false, true} {
+		cfg := baseConfig()
+		cfg.DNS.AllowOtherQueryTypes = allow
+		got, err := Generate(cfg, Outbounds{Tunnel: tunnelJSON, Proxy: proxyJSON}, tb)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if r := matchRoute(t, got, d); r != want {
-			t.Errorf("route %s = %s, want %s (table lookup)", d, r, want)
-		}
-		for _, q := range []string{"A", "AAAA", "HTTPS", "TXT"} {
-			wantDNS := map[string]string{"A": tagDNSFake, "AAAA": tagDNSFake, "HTTPS": "reject", "TXT": tagDNSDirect}[q]
-			if want == string(route.Direct) || want == string(route.Desync) {
-				wantDNS = tagDNSDirect
+		for _, d := range []string{
+			"example.com", "www.example.com", "cdn.example.com", "img.cdn.example.com",
+			"x.cdn.example.com", "y.x.cdn.example.com", "deep.x.cdn.example.com", "z.deep.x.cdn.example.com",
+			"ads.example", "tracker.ads.example", "ok.ads.example", "a.ok.ads.example",
+			"yt.example", "a.yt.example", "b.a.yt.example", "plain.example",
+			"lan.example", "t.lan.example", "u.t.lan.example", "unknown.example",
+		} {
+			want := string(route.Tunnel) // final
+			if e, ok := tb.Lookup(d); ok {
+				want = string(e.Route)
 			}
-			if s := matchDNS(t, got, d, q); s != wantDNS {
-				t.Errorf("dns %s %s = %s, want %s", d, q, s, wantDNS)
+			if r := matchRoute(t, got, d); r != want {
+				t.Errorf("route %s = %s, want %s (table lookup)", d, r, want)
+			}
+			for _, q := range []string{"A", "AAAA", "HTTPS", "TXT", "MX"} {
+				wantDNS := map[string]string{"A": tagDNSFake, "AAAA": tagDNSFake, "HTTPS": "reject", "TXT": "reject", "MX": "reject"}[q]
+				if allow {
+					wantDNS = map[string]string{"A": tagDNSFake, "AAAA": tagDNSFake, "HTTPS": "reject", "TXT": tagDNSDirect, "MX": tagDNSDirect}[q]
+				}
+				if want == string(route.Direct) || want == string(route.Desync) {
+					wantDNS = tagDNSDirect
+				}
+				if s := matchDNS(t, got, d, q); s != wantDNS {
+					t.Errorf("allow=%v dns %s %s = %s, want %s", allow, d, q, s, wantDNS)
+				}
 			}
 		}
 	}

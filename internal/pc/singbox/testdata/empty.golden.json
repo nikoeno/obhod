@@ -16,6 +16,14 @@
           "AAAA"
         ],
         "server": "dns-fakeip"
+      },
+      {
+        "action": "reject",
+        "invert": true,
+        "query_type": [
+          "A",
+          "AAAA"
+        ]
       }
     ],
     "servers": [

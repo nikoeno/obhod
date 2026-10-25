@@ -57,6 +57,7 @@ func TestPinnedCheck(t *testing.T) {
 			cfg := baseConfig()
 			cfg.BlockQUIC = quic
 			cfg.Binary = bin
+			cfg.DNS.AllowOtherQueryTypes = !quic // both DNS rule sets must pass the checker
 			if withProxy {
 				cfg.DNS.DirectDoH = "2606:4700::1111" // bare IPv6 form
 			}

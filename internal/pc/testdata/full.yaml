@@ -25,6 +25,7 @@ singbox:
   dns:
     direct_doh: https://9.9.9.9/dns-query
     fake_ip_range: 198.18.0.0/16
+    allow_other_query_types: true
   clash_api: 127.0.0.1:9191
   own_processes: [myvpn.exe]
   block_quic: false

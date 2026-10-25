@@ -947,20 +947,13 @@ func TestRouting(t *testing.T) {
 		})
 	}
 
-	check("D1 (REVIEW-NOTES Input for decisions): a TXT query for a tunnel domain reaches the direct DoH server", func() error {
+	check("D1: TXT and HTTPS queries for a tunnel domain are rejected and never reach the direct DoH server", func() error {
 		beforeTXT, beforeHTTPS := dohCount("tunnel-a.test", "TXT"), dohCount("tunnel-a.test", "HTTPS")
-		_, _ = dnsAsk(hijacked, "tunnel-a.test", dns.TypeTXT) // the answer does not matter
+		_, _ = dnsAsk(hijacked, "tunnel-a.test", dns.TypeTXT) // the answer (refused) does not matter
 		_, _ = dnsAsk(hijacked, "tunnel-a.test", dns.TypeHTTPS)
-		ctx2, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		err := poll(ctx2, func() error {
-			if dohCount("tunnel-a.test", "TXT") <= beforeTXT {
-				return fmt.Errorf("no TXT query yet")
-			}
-			return nil
-		})
-		if err != nil {
-			return fmt.Errorf("the TXT query did not reach the DoH server (D1 would be fixed or the DoH server unreachable for sing-box): %v", err)
+		time.Sleep(2 * time.Second) // a leaked query would have arrived by now
+		if n := dohCount("tunnel-a.test", "TXT"); n != beforeTXT {
+			return fmt.Errorf("the TXT query reached the DoH server (%d new): dns.allow_other_query_types must default to false", n-beforeTXT)
 		}
 		if n := dohCount("tunnel-a.test", "HTTPS"); n != beforeHTTPS {
 			return fmt.Errorf("the HTTPS query reached the DoH server (%d new), the generated config rejects it", n-beforeHTTPS)

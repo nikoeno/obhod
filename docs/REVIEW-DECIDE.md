@@ -9,7 +9,8 @@ Related: `REVIEW-AI.md` (agent only), `REVIEW-MANUAL.md` (human only).
 ## D1: DNS leak of tunnel domains (from session 3)
 Direct/desync domains go to `dns-direct`, A/AAAA go to FakeIP, HTTPS/SVCB are rejected. Other query types (TXT, MX, ...) of a tunnel domain can still reach the direct DoH server.
 - Agent prepares: the exact query types that leak, where the rule lives in `singbox.go`, the cost of rejecting or tunnelling them.
-- [ ] Decision: acceptable / reject other types / send them through the tunnel.
+- [x] Decision (2026-10-15): reject other types by default; configurable with `dns.allow_other_query_types` (true = old behaviour, leaks the name). Done in `singbox.go`.
+- [x] Decision (2026-10-15): the notification and logging of rejected queries is planned for later, not now. Recorded as G19 in `internal/pc/PLAN.md`. Until then a reject is visible only by setting `singbox.log_level: debug` and reading the sing-box output.
 
 ## D2: monitor heuristics (from session 4)
 `monitor/detect.go` flags `TLS_RST`, `TCP_TIMEOUT`, `STALL_16_20`. Known false positive: idle keep-alive stopping at 12-36 KB.

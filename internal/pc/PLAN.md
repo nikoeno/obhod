@@ -241,6 +241,12 @@ Desktop UI (ADR 0003):
 | G17 | pc | an elevated `splitter` started by the UI must die with the UI | **Decided (v1):** `--parent-pid`; when a service replaces the UAC launch, this goes away |
 | G18 | pc / control | token handoff between the UI and `splitter` | **Proposed:** `--token-file` written by the UI in its per-user directory; never on the command line itself (other processes can read command lines) |
 
+DNS reject notification (from D1, `docs/REVIEW-DECIDE.md`):
+
+| # | Module | Item | State |
+|---|---|---|---|
+| G19 | singbox / procman / status | tell the client when a non-A/AAAA DNS query (TXT, MX, ...) of a non-direct domain was rejected. The reject itself is done and configurable (`dns.allow_other_query_types`, default false = reject). sing-box logs a reject only at `debug`: `dns: exchange <name>. IN TXT`, then `dns: match[n] !(query_type=[A AAAA]) => reject`, joined by the connection id (verified on sing-box 1.14.2). At `info` nothing is logged | **Planned, not started.** Needs: a streaming line tap in `procman` (the 200-line ring buffer loses lines at debug; `procman/API.md` says output is never parsed for decisions, so this changes that rule), a small parser for the two lines, a rejected-query counter in the status `Snapshot` / an `Event` (API change: ask, update `API.md`), a slog line with the query type and the hostname only when the app's debug is on. Open: sing-box must run at `debug` (it logs every hostname, so write it only to a 0600 file or keep it in memory) or use a local DNS sink in the app instead. Decide when the UI needs it (M12) |
+
 ## 3. Not in this plan
 
 - Strategy discovery for the desync engine (the "future strategy finder"); `Strategy` comes from config.

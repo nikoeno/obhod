@@ -85,6 +85,7 @@ singbox:
     dns:
         direct_doh: https://1.1.1.1/dns-query
         fake_ip_range: ""
+        allow_other_query_types: false
     clash_api: ""
     own_processes: []
     block_quic: true
