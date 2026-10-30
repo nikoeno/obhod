@@ -2,7 +2,7 @@
 
 Status: draft (2026-10-25). Describes the Tauri desktop app from ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`). Nothing here is built yet; the only UI that exists today is the read-only status page (`internal/pc/status`). Every action below maps to a control API call planned in M12 (`internal/pc/PLAN.md`); actions marked **later** need a separate decision first.
 
-Visual reference: `docs/reference-one-button.svg` and `docs/one-button.html` (one large accent button, neutral cards, one purple accent).
+Visual style: one large round accent button, neutral cards, one purple accent (`#534ab7` light / `#7f77dd` dark), system font.
 
 ## 1. Principles
 

@@ -1,0 +1,133 @@
+/* Obhod design tokens as CSS custom properties. Source of truth: tokens.json.
+   Extracted from the MVP (ui/web/style.css). Import once at the app root.
+   Theme: follows the OS; force one with <html data-theme="light|dark">. */
+
+:root {
+  /* color */
+  --bg: #ffffff;
+  --card: #f1efe8;
+  --border: #b4b2a9;
+  --text: #2c2c2a;
+  --muted: #5f5e5a;
+  --accent: #534ab7;
+  --on-accent: #ffffff;
+  --accent-soft: rgba(83, 74, 183, 0.14);
+  --halo: rgba(83, 74, 183, 0.28);
+  --warn-bg: #f7ecd2;
+  --warn-text: #5c430c;
+  --ok-bg: #dcefe2;
+  --ok-text: #1f5232;
+  --backdrop: rgba(0, 0, 0, 0.45);
+  --r-direct: #3b7d55;
+  --r-tunnel: var(--accent);
+  --r-desync: #a86b12;
+  --r-proxy: #3a6fa8;
+  --r-block: #a8403f;
+
+  /* type */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  --font-base: 15px;
+  --line-height: 1.45;
+  --fs-h1: 1.5rem;
+  --fs-big-num: 1.4rem;
+  --fs-big-btn: 1.35rem;
+  --fs-h2: 1.1rem;
+  --fs-subtitle: 1.05rem;
+  --fs-h3: 1rem;
+  --fs-table: 0.93rem;
+  --fs-md: 0.92rem;
+  --fs-sm: 0.88rem;
+  --fs-code: 0.86rem;
+  --fs-small: 0.85rem;
+  --fs-xs: 0.82rem;
+  --fs-xxs: 0.78rem;
+  --fs-tabbar: 0.72rem;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius: var(--radius-xl);
+  --radius-pill: 999px;
+
+  /* shadow */
+  --focus: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent);
+  --shadow-halo: 0 0 0 20px var(--halo);
+  --shadow-floating: 0 8px 24px rgba(0, 0, 0, 0.2);
+
+  /* motion */
+  --dur-press: 120ms;
+  --dur-toggle: 150ms;
+  --dur-state: 200ms;
+  --dur-fade: 300ms;
+  --dur-pulse: 1400ms;
+
+  /* layout */
+  --nav-width: 200px;
+  --main-max: 1100px;
+  --home-max: 820px;
+  --sidepanel-width: 320px;
+  --dialog-max: 680px;
+  --big-button: 168px;
+
+  /* z */
+  --z-tabbar: 20;
+  --z-devpanel: 40;
+  --z-skip: 50;
+  --z-toast: 60;
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1c1c1a;
+    --card: #2c2c2a;
+    --border: #5f5e5a;
+    --text: #f1efe8;
+    --muted: #b4b2a9;
+    --accent: #7f77dd;
+    --on-accent: #1c1c1a;
+    --accent-soft: rgba(127, 119, 221, 0.18);
+    --halo: rgba(127, 119, 221, 0.32);
+    --warn-bg: #3d3420;
+    --warn-text: #f0d9a0;
+    --ok-bg: #213a2a;
+    --ok-text: #b5e3c4;
+    --r-direct: #6dbb8b;
+    --r-desync: #e0a84a;
+    --r-proxy: #79aee3;
+    --r-block: #e07c7a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #1c1c1a;
+  --card: #2c2c2a;
+  --border: #5f5e5a;
+  --text: #f1efe8;
+  --muted: #b4b2a9;
+  --accent: #7f77dd;
+  --on-accent: #1c1c1a;
+  --accent-soft: rgba(127, 119, 221, 0.18);
+  --halo: rgba(127, 119, 221, 0.32);
+  --warn-bg: #3d3420;
+  --warn-text: #f0d9a0;
+  --ok-bg: #213a2a;
+  --ok-text: #b5e3c4;
+  --r-direct: #6dbb8b;
+  --r-desync: #e0a84a;
+  --r-proxy: #79aee3;
+  --r-block: #e07c7a;
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* Breakpoints (CSS variables cannot be used in media queries):
+   mobile: (max-width: 639px)  split: (max-width: 899px) */
