@@ -154,6 +154,11 @@ Results recorded from the real-kernel run: a stall rule added while connected mo
 - `docs/RELEASE.md` (new): the pre-release checklist: one-time WSL2 setup (distro packages, Go, kernel check through `make e2e`'s preflight), then `make build` → `make fetch` → `make e2e` in WSL2 → `internal/pc/SMOKE.md` "Windows" on the host → attach the report. It links `docs/RECOVERY.md`.
 - `internal/pc/SMOKE.md` "Linux": the items the lab now covers (nft table check, kill -9, teardown) point at the lab scenarios instead of being run by hand.
 
+### L11 — Xray sidecar (planned, not started)
+Depends on the product feature: Xray as an optional outbound sidecar behind sing-box (sing-box keeps the TUN, routing, DNS and Clash API; `tunnel` becomes a SOCKS outbound to Xray's loopback port when the selected node needs an Xray-only transport such as XHTTP). Needs xray-core in `third_party/manifest.yaml` (a new binary: ask first) and the fake VPS running an Xray server inbound next to its sing-box one.
+- **No routing loop:** with the TUN up and an Xray node selected, Xray's connection to the fake VPS leaves through the physical uplink directly. Evidence: the VPS logs the client's uplink address as the source, and no connection of the `xray` process shows up on the `tunnel` outbound in the Clash API (only the client's traffic, as `tunnel` → SOCKS).
+- **Server hostname resolves outside FakeIP:** a node whose server is a hostname (a fakedns zone name for the VPS, e.g. `vps.test`) works, and Xray never connects to an address in the FakeIP range (198.18.0.0/16). Evidence: no SYN to 198.18.0.0/16 from the client namespace (`sniff_linux.go`), and the VPS sees the handshake. Catches Xray resolving through the system resolver, whose query sing-box hijacks into FakeIP.
+
 ## 5. Risks and things to verify early
 
 - **sing-box trusting the test CA** for its DoH server: `SSL_CERT_FILE` should work if sing-box uses the system pool; verify in L5. If not, the lab DoH needs another way in (would be a `singbox` config change: ask).
