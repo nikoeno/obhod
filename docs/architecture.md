@@ -6,7 +6,7 @@ Generated from the API.md headers. docs/project-notes.md was not present when th
 
 ## 2. Rules
 
-The architecture rules (module shape, placement, import rules a-e, API.md header) are in [BOOTSTRAP.md](../BOOTSTRAP.md) section 1 and condensed in [AGENTS.md](../AGENTS.md).
+The architecture rules (module shape, placement, import rules a-f, API.md header) are in [BOOTSTRAP.md](../BOOTSTRAP.md) section 1 and condensed in [AGENTS.md](../AGENTS.md). The `api/` tree (gateways that may import any `internal/` module, rule f) is decided in [ADR 0004](adr/0004-api-tree-and-gateway-rule.md); no gateway exists yet, so the tree and tables below list none.
 
 ## 3. Module tree
 

@@ -23,6 +23,7 @@ type Module struct {
 	Consumers []string
 	Children  []string
 	UsesLibs  []string
+	UsesMods  []string // "Uses modules": rule (f), api/ gateways only
 }
 
 // Registry maps a module path to its header.
@@ -78,6 +79,7 @@ func parseHeader(file string) (Module, error) {
 		Consumers: splitList(fields["Consumers"]),
 		Children:  splitList(fields["Children"]),
 		UsesLibs:  splitList(fields["Uses libs"]),
+		UsesMods:  splitList(fields["Uses modules"]),
 	}
 	if m.Path == "" || m.Kind == "" {
 		return m, fmt.Errorf("%s: header lacks Path or Kind", file)
@@ -88,7 +90,10 @@ func parseHeader(file string) (Module, error) {
 func loadRegistry(t testing.TB, root string) Registry {
 	t.Helper()
 	reg := Registry{}
-	for _, top := range []string{"internal", "lab"} {
+	for _, top := range []string{"internal", "lab", "api"} {
+		if _, err := os.Stat(filepath.Join(root, top)); err != nil {
+			continue // api/ exists only once a gateway does
+		}
 		err := filepath.WalkDir(filepath.Join(root, top), func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -119,6 +124,9 @@ func loadRegistry(t testing.TB, root string) Registry {
 
 func isLab(p string) bool { return p == "lab" || strings.HasPrefix(p, "lab/") }
 
+// isAPI reports whether p is the api/ tree or inside it.
+func isAPI(p string) bool { return p == "api" || strings.HasPrefix(p, "api/") }
+
 // isAncestorOrSelf reports whether a is p or a proper ancestor folder of p.
 func isAncestorOrSelf(a, p string) bool { return a == p || strings.HasPrefix(p, a+"/") }
 
@@ -132,7 +140,7 @@ func libRoot(to string) (string, bool) {
 	return path.Dir(dir), true
 }
 
-// allowed applies import rules (a)-(e). Paths are repo-relative.
+// allowed applies import rules (a)-(f). Paths are repo-relative.
 func allowed(from, to string, isTest bool, reg Registry) (bool, string) {
 	// (c) entry points.
 	if strings.HasPrefix(from, "cmd/") {
@@ -148,6 +156,10 @@ func allowed(from, to string, isTest bool, reg Registry) (bool, string) {
 	// (e) test-only modules.
 	if reg[to].Kind == "test-only" && !isTest && !isLab(from) {
 		return false, "(e) test-only module imported from non-test code"
+	}
+	// (f) nothing outside api/ imports a gateway (cmd/<binary> is rule (c)).
+	if isAPI(to) && !isAPI(from) {
+		return false, "(f) only cmd/<binary> may import a module under api/"
 	}
 	// (d) lab.
 	if isLab(from) {
@@ -172,6 +184,20 @@ func allowed(from, to string, isTest bool, reg Registry) (bool, string) {
 	if a, ok := libRoot(to); ok && isAncestorOrSelf(a, from) {
 		return true, "(b) ancestor lib"
 	}
+	// (f) gateways under api/ may import any other module under internal/.
+	if isAPI(from) {
+		switch {
+		case isAncestorOrSelf(to, from):
+			return false, "importing a parent is forbidden"
+		case isAPI(to):
+			return false, "(f) a gateway may not import another module under api/"
+		case reg[to].Kind == "test-only":
+			return false, "(f) test-only modules are not importable from api/"
+		case strings.HasPrefix(to, "internal/"):
+			return true, "(f) gateway uses module"
+		}
+		return false, "(f) a gateway may import only modules under internal/"
+	}
 	switch {
 	case isAncestorOrSelf(to, from):
 		return false, "importing a parent is forbidden"
@@ -190,6 +216,8 @@ func TestAllowed(t *testing.T) {
 	reg := Registry{
 		"internal/b":     {Kind: "app", Binary: "b"},
 		"internal/lib/t": {Kind: "test-only"},
+		"api/g":          {Kind: "app", Binary: "g"},
+		"api/h":          {Kind: "app", Binary: "h"},
 	}
 	cases := []struct {
 		from, to string
@@ -212,6 +240,31 @@ func TestAllowed(t *testing.T) {
 		{"lab", "lab/k", false, true},
 		{"lab/k", "internal/lib/m", false, true},
 		{"lab/k", "internal/x", false, false},
+		// (f) gateways.
+		{"api/g", "internal/pc", false, true},
+		{"api/g", "internal/pc/status", false, true},
+		{"api/g", "internal/pc/lib/clashapi", false, true},
+		{"api/g", "internal/lib/m", false, true},
+		{"api/g", "internal/lib/m/n", false, true},
+		{"api/g", "api/g/c", false, true},
+		{"api/g", "api/g/lib/s", false, true},
+		{"api/g", "api/g/c/d", false, false},
+		{"api/g/c", "api/g", false, false},
+		{"api/g/c", "internal/pc", false, true},
+		{"api/g/c", "api/g/w", false, false},
+		{"api/g", "api/h", false, false},
+		{"api/g/c", "api/h", false, false},
+		{"api/g", "internal/lib/t", false, false},
+		{"api/g", "internal/lib/t", true, false},
+		{"api/g", "lab/k", false, false},
+		{"api/g", "cmd/g", false, false},
+		{"internal/pc", "api/g", false, false},
+		{"internal/pc/status", "api/g", true, false},
+		{"internal/lib/m", "api/g", false, false},
+		{"lab", "api/g", false, false},
+		{"lab/k", "api/g", false, false},
+		{"cmd/g", "api/g", false, true},
+		{"cmd/h", "api/g", false, false},
 	}
 	for _, c := range cases {
 		got, why := allowed(c.from, c.to, c.test, reg)
@@ -263,7 +316,7 @@ func TestRegistry(t *testing.T) {
 			}
 		}
 	}
-	for _, top := range []string{"internal", "lab"} {
+	for _, top := range []string{"internal", "lab", "api"} {
 		_ = filepath.WalkDir(top, func(p string, d fs.DirEntry, err error) error {
 			if err != nil || !d.IsDir() {
 				return nil
@@ -309,8 +362,57 @@ func goList(t testing.TB, env []string, args ...string) []listedPkg {
 	return pkgs
 }
 
-// TestArchitecture checks every in-repo import against rules (a)-(e) and the
-// Consumers / Children / Uses libs declared in the API.md headers.
+// usesModulesProblems reports Uses modules entries that are not imported (rule
+// (f)) or that sit in a module outside api/.
+func usesModulesProblems(reg Registry, used map[string]map[string]bool) []string {
+	var problems []string
+	for p, m := range reg {
+		for _, u := range m.UsesMods {
+			switch {
+			case !isAPI(p):
+				problems = append(problems, fmt.Sprintf("%s: Uses modules is only for modules under api/", p))
+			case !used[p][u]:
+				problems = append(problems, fmt.Sprintf("%s: Uses modules lists %s but it is not imported (rule (f))", p, u))
+			}
+		}
+	}
+	return problems
+}
+
+// TestUsesModules checks the Uses modules parsing and the unused-entry check.
+func TestUsesModules(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "API.md")
+	hdr := strings.Join([]string{
+		"# Module: g", "", "| Field | Value |", "|---|---|",
+		"| Path | api/g |", "| Kind | app |", "| Binary | g |",
+		"| Uses modules | internal/pc, internal/lib/m |", "", "## Responsibility", "",
+	}, "\n")
+	if err := os.WriteFile(file, []byte(hdr), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := parseHeader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.UsesMods) != 2 || m.UsesMods[0] != "internal/pc" || m.UsesMods[1] != "internal/lib/m" {
+		t.Fatalf("UsesMods = %v", m.UsesMods)
+	}
+	reg := Registry{"api/g": m, "internal/x": {UsesMods: []string{"internal/pc"}}}
+	used := map[string]map[string]bool{"api/g": {"internal/pc": true}}
+	got := usesModulesProblems(reg, used)
+	if len(got) != 2 {
+		t.Fatalf("want an unused entry and a misplaced field, got %v", got)
+	}
+	used["api/g"]["internal/lib/m"] = true
+	if got := usesModulesProblems(Registry{"api/g": m}, used); len(got) != 0 {
+		t.Fatalf("unexpected problems: %v", got)
+	}
+}
+
+// TestArchitecture checks every in-repo import against rules (a)-(f) and the
+// Consumers / Children / Uses libs / Uses modules declared in the API.md
+// headers. Rule (f) imports (api/ gateway -> internal module) are covered by
+// Uses modules only: they need no Consumers entry on the imported module.
 func TestArchitecture(t *testing.T) {
 	reg := loadRegistry(t, ".")
 	modOut, err := exec.Command("go", "list", "-m").Output()
@@ -339,6 +441,7 @@ func TestArchitecture(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	var problems []string
+	usedMods := map[string]map[string]bool{} // gateway -> rule (f) imports seen
 	for _, cfg := range configs {
 		for _, p := range goList(t, cfg.env, append(append([]string{}, cfg.args...), "./...")...) {
 			from, ok := rel(p.ImportPath)
@@ -364,11 +467,22 @@ func TestArchitecture(t *testing.T) {
 					continue
 				}
 				seen[key] = true
-				if ok, why := allowed(from, to, isTest, reg); !ok {
+				ok, why := allowed(from, to, isTest, reg)
+				if !ok {
 					problems = append(problems, fmt.Sprintf("%s: %s", key, why))
 					continue
 				}
 				if strings.HasPrefix(from, "cmd/") {
+					continue
+				}
+				if strings.HasPrefix(why, "(f)") && isAPI(from) {
+					if usedMods[from] == nil {
+						usedMods[from] = map[string]bool{}
+					}
+					usedMods[from][to] = true
+					if pm, ok := reg[from]; ok && !contains(pm.UsesMods, to) {
+						problems = append(problems, fmt.Sprintf("%s: %s is not listed in Uses modules of %s", key, to, from))
+					}
 					continue
 				}
 				if q, ok := reg[to]; ok && !contains(q.Consumers, from) {
@@ -380,5 +494,6 @@ func TestArchitecture(t *testing.T) {
 			}
 		}
 	}
+	problems = append(problems, usesModulesProblems(reg, usedMods)...)
 	report(t, problems)
 }

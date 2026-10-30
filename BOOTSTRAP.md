@@ -27,6 +27,7 @@ Trees:
 
 - `internal/` is the application tree. `internal/lib/` holds modules shared across apps.
 - `lab/` is the test-lab tree.
+- `api/` holds the HTTP API gateways (ADR 0004). It is a plain directory; each `api/<name>` is an app module.
 - `cmd/<binary>/` are entry points, outside both trees.
 - `lib/` folders, `internal/` and `internal/lib/` are plain directories: no Go files and no `API.md`. Only modules inside them have those.
 
@@ -49,6 +50,7 @@ A package **P** may import a package **Q** from this repo only if one of these h
 - **(c) Entry point:** `cmd/<binary>` imports only the app module whose `API.md` declares `Binary: <binary>`.
 - **(d) Lab:** packages in `lab/` follow (a) and (b) within `lab/`, and may also import `internal/lib/<name>` roots.
 - **(e) Test-only:** modules with `Kind: test-only` in `API.md` may be imported only from `_test.go` files and from `lab/`.
+- **(f) Gateway:** a module under `api/` may import any module under `internal/` (children included), except its ancestors, `test-only` modules and other `api/` modules. Each such import is listed in its `Uses modules` field. Nothing outside `api/` imports a gateway except `cmd/<binary>` via (c).
 
 Everything else is forbidden: no sibling imports, no importing a parent, no reaching into another module's children. Siblings that need to share something get a `lib/` in their parent.
 
@@ -68,6 +70,7 @@ Every module's `API.md` starts with this header. The architecture test and the b
 | Consumers | modules that import this one |
 | Children | direct child modules (incl. its own lib/ modules), or – |
 | Uses libs | lib modules this one imports, or – |
+| Uses modules | rule (f) imports (`api/` gateways only), or – |
 | Build tags | e.g. `lab`, `linux`, or – |
 | Status | planned \| design ready \| in progress \| done |
 ```
@@ -167,7 +170,7 @@ Create `arch_test.go` at the repo root (`package arch_test`, standard library on
 
 - **Module registry:** walk the repo, parse every `API.md` header (Path, Kind, Binary, Build tags).
 - **Registry checks:** every Go package under `internal/` and `lab/` has an `API.md` in its folder (`testdata/` excluded), and every `API.md` has a Go package.
-- **Import checks:** load packages with `go list -json ./...` (via `os/exec`), for the default build, with `-tags lab`, and with `GOOS=linux` and `GOOS=windows`, including `Imports`, `TestImports` and `XTestImports`. Apply rules (a)–(e) to every in-repo import.
+- **Import checks:** load packages with `go list -json ./...` (via `os/exec`), for the default build, with `-tags lab`, and with `GOOS=linux` and `GOOS=windows`, including `Imports`, `TestImports` and `XTestImports`. Apply rules (a)–(f) to every in-repo import.
 - **Consumer check:** for every in-repo import P → Q, P must be listed in Q's `Consumers` (by path), and Q must be in P's `Children` or `Uses libs`. Undeclared dependencies fail.
 - Put the rule logic in a pure function `allowed(from, to string, isTest bool, reg Registry) (bool, string)` and table-test it with synthetic paths. Minimum cases:
 
