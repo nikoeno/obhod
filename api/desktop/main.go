@@ -1,10 +1,6 @@
-package pc
+package desktop
 
-import (
-	"os"
-)
-
-const binary = "splitter"
+import "os"
 
 // Main parses args, runs the app, and returns the exit code.
 func Main(args []string) int {

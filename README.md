@@ -9,7 +9,7 @@ Traffic splitter: it probes the local network to find which domains are blocked 
 | Binary | App module |
 |---|---|
 | `blockanalyzer` | `internal/blockanalyzer` |
-| `splitter` | `internal/pc` |
+| `splitter` | `api/desktop` |
 | `splitter-router` | `internal/router` |
 
 ## Layout

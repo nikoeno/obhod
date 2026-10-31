@@ -151,12 +151,15 @@ func (f *fakeProcs) spec(name string) (procman.Spec, bool) {
 }
 
 type fakeChecker struct {
-	log     *opLog
-	mu      sync.Mutex
-	table   route.Table
-	sub     chan route.Table
-	reports []checker.Failure
-	runs    int
+	log       *opLog
+	mu        sync.Mutex
+	table     route.Table
+	sub       chan route.Table
+	reports   []checker.Failure
+	checkNow  [][]string // arguments of CheckNow calls
+	running   bool       // reported as Status().Running
+	lastCheck time.Time
+	runs      int
 	// subscribed is set by Subscribe. Like the real checker, publish announces
 	// a table only to a subscriber that exists at that moment.
 	subscribed bool
@@ -183,8 +186,15 @@ func (f *fakeChecker) ReportFailure(x checker.Failure) {
 	f.reports = append(f.reports, x)
 	f.mu.Unlock()
 }
+func (f *fakeChecker) CheckNow(domains ...string) {
+	f.mu.Lock()
+	f.checkNow = append(f.checkNow, domains)
+	f.mu.Unlock()
+}
 func (f *fakeChecker) Status() checker.Status {
-	return checker.Status{Network: checker.Network{ASName: "AS64500 Example"}, Counts: map[route.Route]int{route.Tunnel: 2}, Warnings: []string{"warn"}}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return checker.Status{Running: f.running, LastCheck: f.lastCheck, Network: checker.Network{ID: "asn:64500", Known: true, ASName: "AS64500 Example"}, Counts: map[route.Route]int{route.Tunnel: 2}, Warnings: []string{"warn"}}
 }
 
 // publish makes t the current table and announces it, as the real checker does.
@@ -231,6 +241,7 @@ type harness struct {
 	t       *testing.T
 	log     *opLog
 	fc      *clock.Fake
+	ev      *clock.Fake // the clock of the event ticker and check watcher (kept apart so the reload tests can count timers on fc)
 	procs   *fakeProcs
 	chk     *fakeChecker
 	mon     *fakeLoop
@@ -273,7 +284,7 @@ const tunnelJSON = `{"type":"vless","server":"203.0.113.7","server_port":443,"uu
 
 func newHarness(t *testing.T, initial route.Table, opts ...Option) *harness {
 	t.Helper()
-	h := &harness{t: t, log: &opLog{}, fc: clock.NewFake(time.Unix(1_000_000, 0)), admin: true, nft: true, ipRules: engineRuleListing,
+	h := &harness{t: t, log: &opLog{}, fc: clock.NewFake(time.Unix(1_000_000, 0)), ev: clock.NewFake(time.Unix(1_000_000, 0)), admin: true, nft: true, ipRules: engineRuleListing,
 		uplink: netif.Interface{Name: "eth0", Index: 3}, netEv: make(chan netif.Event, 4)}
 	h.p = paths.FromRoot(t.TempDir())
 	h.procs = newFakeProcs(h.log)
@@ -288,6 +299,7 @@ func newHarness(t *testing.T, initial route.Table, opts ...Option) *harness {
 	h.parent = func() bool { return true }
 	h.d = &deps{
 		clk:     h.fc,
+		evClk:   h.ev,
 		checker: h.chk,
 		procs:   h.procs,
 		newClash: func(base, secret string) clashapi.Client {
@@ -511,7 +523,7 @@ func TestEmptyDesyncListMeansNoEngine(t *testing.T) {
 }
 
 func TestUIStartsDisconnectedAndConnects(t *testing.T) {
-	h := newHarness(t, baseTable(t), withUI(true))
+	h := newHarness(t, baseTable(t), WithUI(true))
 	stop := h.start()
 	h.waitOp("status.start")
 	if h.app.State() != StateDisconnected {
@@ -571,13 +583,13 @@ func TestConnectNeedsRunningApp(t *testing.T) {
 }
 
 func TestConnectFailureRollsBack(t *testing.T) {
-	h := newHarness(t, baseTable(t), withUI(true))
+	h := newHarness(t, baseTable(t), WithUI(true))
 	h.start()
 	h.waitOp("status.start")
 	h.procs.startErr[nameSingBox] = errors.New("boom")
 	err := h.app.Connect(context.Background())
-	if err == nil || exitCode(err) != exitRuntime {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if err == nil || ExitCode(err) != ExitRuntime {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 	if h.app.State() != StateDisconnected {
 		t.Fatalf("state = %s", h.app.State())
@@ -588,7 +600,7 @@ func TestConnectFailureRollsBack(t *testing.T) {
 }
 
 func TestTableChangeWhileDisconnectedRestartsNothing(t *testing.T) {
-	h := newHarness(t, baseTable(t), withUI(true))
+	h := newHarness(t, baseTable(t), WithUI(true))
 	h.start()
 	h.waitOp("status.start")
 	waitUntil(t, "reload loop", func() bool { return h.fc.Waiters() == 0 })
@@ -792,8 +804,8 @@ func TestNeedsAdminExitCode(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.admin = false
 	err := h.app.Run(context.Background())
-	if exitCode(err) != exitManual || !strings.Contains(err.Error(), elevationHint) {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitManual || !strings.Contains(err.Error(), elevationHint) {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 	if h.log.index("checker.start") >= 0 {
 		t.Fatal("something started without admin rights")
@@ -802,8 +814,8 @@ func TestNeedsAdminExitCode(t *testing.T) {
 	h = newHarness(t, baseTable(t))
 	h.procs.startErr[nameSingBox] = procman.ErrNeedsAdmin
 	err = h.app.Run(context.Background())
-	if exitCode(err) != exitManual {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitManual {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 	if h.log.index("stop winws2") < 0 || h.log.index("checker.stop") < 0 {
 		t.Fatalf("failed start did not clean up: %s", h.ops())
@@ -815,8 +827,8 @@ func TestMissingNFTTablePrintsSetupAndExits2(t *testing.T) {
 	h.app.cfg.Desync.Engine = desync.NFQWS
 	h.nft = false
 	err := h.app.Run(context.Background())
-	if exitCode(err) != exitManual {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitManual {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 	for _, want := range []string{"nft add table inet splitter", "queue num 200", "nft delete table inet splitter"} {
 		if !strings.Contains(err.Error(), want) {
@@ -850,7 +862,7 @@ func TestMonitorFailureReachesChecker(t *testing.T) {
 func TestParentExitShutsDown(t *testing.T) {
 	var alive = true
 	var mu sync.Mutex
-	h := newHarness(t, baseTable(t), withUI(true), withParentPID(4242))
+	h := newHarness(t, baseTable(t), WithUI(true), WithParentPID(4242))
 	h.parent = func() bool { mu.Lock(); defer mu.Unlock(); return alive }
 	done := make(chan error, 1)
 	go func() { done <- h.app.Run(context.Background()) }()
@@ -883,8 +895,8 @@ func TestNoExcludeAddressIsConfigError(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.app.outbounds.Tunnel = json.RawMessage(`{"type":"vless","server":"vpn.example.org","server_port":443}`)
 	err := h.app.Run(context.Background())
-	if exitCode(err) != exitConfig || !strings.Contains(err.Error(), "exclude_ips") {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitConfig || !strings.Contains(err.Error(), "exclude_ips") {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 	// An unrelated configured exclude does not protect a host-name tunnel
 	// that did not resolve.
@@ -892,8 +904,8 @@ func TestNoExcludeAddressIsConfigError(t *testing.T) {
 	h.app.outbounds.Tunnel = json.RawMessage(`{"type":"vless","server":"vpn.example.org","server_port":443}`)
 	h.app.cfg.Desync.ExcludeIPs = []netip.Prefix{netip.MustParsePrefix("198.51.100.5/32")}
 	err = h.app.Run(context.Background())
-	if exitCode(err) != exitConfig || !strings.Contains(err.Error(), "could not be resolved") {
-		t.Fatalf("unresolved host-name tunnel: err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitConfig || !strings.Contains(err.Error(), "could not be resolved") {
+		t.Fatalf("unresolved host-name tunnel: err = %v, code %d", err, ExitCode(err))
 	}
 	if h.log.index("start winws2") >= 0 || h.log.index("start sing-box") >= 0 {
 		t.Fatalf("started without protecting the tunnel: %s", h.ops())
@@ -940,14 +952,14 @@ func TestExitCodes(t *testing.T) {
 		err  error
 		want int
 	}{
-		"nil":         {nil, exitOK},
-		"config":      {fail(exitConfig, "x"), exitConfig},
-		"wrapped":     {errors.Join(errors.New("a"), fail(exitManual, "x")), exitManual},
-		"needs admin": {procman.ErrNeedsAdmin, exitManual},
-		"other":       {errors.New("boom"), exitRuntime},
+		"nil":         {nil, ExitOK},
+		"config":      {fail(ExitConfig, "x"), ExitConfig},
+		"wrapped":     {errors.Join(errors.New("a"), fail(ExitManual, "x")), ExitManual},
+		"needs admin": {procman.ErrNeedsAdmin, ExitManual},
+		"other":       {errors.New("boom"), ExitRuntime},
 	}
 	for name, c := range cases {
-		if got := exitCode(c.err); got != c.want {
+		if got := ExitCode(c.err); got != c.want {
 			t.Errorf("%s: %d, want %d", name, got, c.want)
 		}
 	}

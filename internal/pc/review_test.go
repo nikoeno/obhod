@@ -45,8 +45,8 @@ func TestBusyStatusPortFailsBeforeTheTunnel(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.status.listenErr = errors.New("listen tcp 127.0.0.1:9091: bind: address already in use")
 	err := h.app.Run(context.Background())
-	if exitCode(err) != exitConfig || !strings.Contains(err.Error(), "status.listen") {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitConfig || !strings.Contains(err.Error(), "status.listen") {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 	if h.log.index("start sing-box") >= 0 || h.log.index("start winws2") >= 0 {
 		t.Fatalf("tunnel started although the status port was busy: %s", h.ops())
@@ -102,8 +102,8 @@ func TestSingBoxLostEndsTerminalRun(t *testing.T) {
 	h.publishAndFire(tbl(t, ent("yt.example", route.Desync), ent("blocked.example", route.Direct)))
 	select {
 	case err := <-done:
-		if exitCode(err) != exitRuntime || !strings.Contains(err.Error(), "sing-box failed") {
-			t.Fatalf("err = %v, code %d", err, exitCode(err))
+		if ExitCode(err) != ExitRuntime || !strings.Contains(err.Error(), "sing-box failed") {
+			t.Fatalf("err = %v, code %d", err, ExitCode(err))
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatalf("Run did not end after sing-box was lost: %s", h.ops())
@@ -114,7 +114,7 @@ func TestSingBoxLostEndsTerminalRun(t *testing.T) {
 }
 
 func TestSingBoxGiveUpDisconnectsInUIMode(t *testing.T) {
-	h := newHarness(t, baseTable(t), withUI(true))
+	h := newHarness(t, baseTable(t), WithUI(true))
 	h.start()
 	h.waitOp("status.start")
 	if err := h.app.Connect(context.Background()); err != nil {
@@ -216,8 +216,8 @@ func TestStaleNFTTableRefusesConnect(t *testing.T) {
 	h.app.cfg.Desync.Engine = desync.NFQWS
 	h.nftList = "table inet splitter {\n ip daddr 198.51.100.1 return\n oifname \"eth9\" queue\n}"
 	err := h.app.Run(context.Background())
-	if exitCode(err) != exitManual || !strings.Contains(err.Error(), "another plan") || !strings.Contains(err.Error(), "nft flush table inet splitter") {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitManual || !strings.Contains(err.Error(), "another plan") || !strings.Contains(err.Error(), "nft flush table inet splitter") {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 }
 
@@ -260,7 +260,7 @@ func TestDisconnectGivesUpOnBusyLock(t *testing.T) {
 }
 
 func TestUIConnectEndsWithRun(t *testing.T) {
-	h := newHarness(t, baseTable(t), withUI(true))
+	h := newHarness(t, baseTable(t), WithUI(true))
 	block := make(chan struct{})
 	h.d.uplink = func(ctx context.Context) (netif.Interface, error) {
 		select {

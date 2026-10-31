@@ -6,7 +6,7 @@ Generated from the API.md headers. docs/project-notes.md was not present when th
 
 ## 2. Rules
 
-The architecture rules (module shape, placement, import rules a-f, API.md header) are in [BOOTSTRAP.md](../BOOTSTRAP.md) section 1 and condensed in [AGENTS.md](../AGENTS.md). The `api/` tree (gateways that may import any `internal/` module, rule f) is decided in [ADR 0004](adr/0004-api-tree-and-gateway-rule.md); no gateway exists yet, so the tree and tables below list none.
+The architecture rules (module shape, placement, import rules a-f, API.md header) are in [BOOTSTRAP.md](../BOOTSTRAP.md) section 1 and condensed in [AGENTS.md](../AGENTS.md). The `api/` tree (gateways that may import any `internal/` module, rule f) is decided in [ADR 0004](adr/0004-api-tree-and-gateway-rule.md). The first gateway is `api/desktop` (the `splitter` app); it serves no HTTP API yet (milestone 3).
 
 ## 3. Module tree
 
@@ -31,7 +31,7 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
     - `internal/lib/route`: defines the route kinds, domain normalization and the RouteTable shared by all modules
     - `internal/lib/testca`: creates an in-memory test certificate authority for lab and fault-server tests
     - `internal/lib/version`: holds build version information injected at link time
-  - `internal/pc`: runs the desktop app: checker, sing-box, desync engine, monitor and status page
+  - `internal/pc`: composes the desktop engine: checker, sing-box, desync engine, monitor and status page
     - `internal/pc/desync`: builds the local desync engine plan (zapret2: winws2 or nfqws2) for the desync domains
       - `internal/pc/desync/nfqws`: renders nfqws2 (zapret2) arguments, hostlist and nftables rules
       - `internal/pc/desync/winws`: renders winws2 (zapret2, WinDivert) arguments and hostlist
@@ -47,11 +47,13 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
   - `lab/fakedns`: serves the lab's DoH and plain DNS with a static zone, poisoning and a query log
   - `lab/fakedpi`: emulates TSPU-like blocking on packets via NFQUEUE inside a lab namespace
   - `lab/netns`: creates and tears down network namespaces, veth links and routes for the lab
+- `api/desktop`: the splitter app: command line in front of `internal/pc` (HTTP API gateway for the desktop UI, ADR 0004)
 
 ## 4. Placement
 
 | Path | Kind | Consumers | Children | Status |
 |---|---|---|---|---|
+| `api/desktop` | app | cmd/splitter | – | implemented (no HTTP API yet) |
 | `internal/blockanalyzer` | app | cmd/blockanalyzer | – | design ready (see internal/lib/analyzer/AGENTS.md) |
 | `internal/lib/analyzer` | lib | internal/blockanalyzer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/netwatch, internal/pc, internal/pc/monitor, internal/router, lab, lab/fakeasn | internal/lib/analyzer/classify, internal/lib/analyzer/dnscheck, internal/lib/analyzer/dialer, internal/lib/analyzer/lib/verdict | design ready (see DESIGN.md, AGENTS.md) |
 | `internal/lib/analyzer/classify` | child | internal/lib/analyzer | – | design ready |
@@ -73,7 +75,7 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 | `internal/lib/route` | lib | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop, lab | – | planned |
 | `internal/lib/testca` | test-only | internal/lib/analyzer, internal/lib/faultserver, lab | – | planned |
 | `internal/lib/version` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
-| `internal/pc` | app | cmd/splitter | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/lib/clashapi | implemented |
+| `internal/pc` | child | api/desktop | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/lib/clashapi | implemented |
 | `internal/pc/desync` | child | internal/pc | internal/pc/desync/winws, internal/pc/desync/nfqws | implemented |
 | `internal/pc/desync/nfqws` | child | internal/pc/desync | – | implemented |
 | `internal/pc/desync/winws` | child | internal/pc/desync | – | implemented |
@@ -95,5 +97,5 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 | Binary | App module |
 |---|---|
 | `blockanalyzer` | `internal/blockanalyzer` |
-| `splitter` | `internal/pc` |
+| `splitter` | `api/desktop` |
 | `splitter-router` | `internal/router` |

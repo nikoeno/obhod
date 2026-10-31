@@ -36,7 +36,7 @@ func (a *App) render(ctx context.Context, b binaries, t route.Table, wantPlan bo
 	scfg.OwnProcesses = a.ownProcesses(b)
 	out, err := singbox.Generate(scfg, a.outbounds, t)
 	if err != nil {
-		return r, fail(exitConfig, "sing-box config: %v", err)
+		return r, fail(ExitConfig, "sing-box config: %w", err)
 	}
 	r.singBox = out
 	return r, nil
@@ -56,18 +56,18 @@ func (a *App) buildPlan(ctx context.Context, b binaries, t route.Table) (desync.
 	// A host-name tunnel is protected only by the addresses it resolved to:
 	// an unrelated desync.exclude_ips entry must not count as protection.
 	if tunnelHost(a.outbounds.Tunnel) != "" && len(resolved) == 0 {
-		return desync.Plan{}, fail(exitConfig, "%v", errTunnelUnresolved)
+		return desync.Plan{}, fail(ExitConfig, "%w", errTunnelUnresolved)
 	}
 	dcfg.ExcludeIPs = excludeIPs(dcfg.ExcludeIPs, a.outbounds.Tunnel, resolved...)
 	if len(dcfg.ExcludeIPs) == 0 {
-		return desync.Plan{}, fail(exitConfig, "%v", errNoExclude)
+		return desync.Plan{}, fail(ExitConfig, "%v", errNoExclude)
 	}
 	if b.desync == "" {
-		return desync.Plan{}, fail(exitConfig, "the desync engine binary was not found; set desync.binary or put it next to the executable")
+		return desync.Plan{}, fail(ExitConfig, "the desync engine binary was not found; set desync.binary or put it next to the executable")
 	}
 	up, err := a.d.uplink(ctx)
 	if err != nil {
-		return desync.Plan{}, fail(exitRuntime, "no uplink interface: %v", err)
+		return desync.Plan{}, fail(ExitRuntime, "no uplink interface: %v", err)
 	}
 	// Our own TUN must never be taken for the uplink, whatever netif thinks.
 	if up.Name == a.tunName() {
@@ -76,9 +76,9 @@ func (a *App) buildPlan(ctx context.Context, b binaries, t route.Table) (desync.
 	plan, err := desync.Build(dcfg, up, t)
 	switch {
 	case errors.Is(err, desync.ErrNoExcludeIP), errors.Is(err, desync.ErrInvalidConfig):
-		return desync.Plan{}, fail(exitConfig, "%v", err)
+		return desync.Plan{}, fail(ExitConfig, "%v", err)
 	case err != nil:
-		return desync.Plan{}, fail(exitRuntime, "desync plan: %v", err)
+		return desync.Plan{}, fail(ExitRuntime, "desync plan: %v", err)
 	}
 	return plan, nil
 }

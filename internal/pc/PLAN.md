@@ -1,12 +1,12 @@
 # Implementation plan — pc (internal/pc)
 
-Status: M1-M11 are done (all `internal/pc` modules are `implemented`; M11's manual part is the checklist in `SMOKE.md`). M12 (control API for the desktop UI) is open and blocked on the G15 decision and an approved contract. Each module's `API.md` is the source of truth; this file keeps the order of the work, the contract gaps and how each was closed. Delete it (or fold the leftovers into a `DESIGN.md`) when M12 is done.
+Status: M1-M11 are done (all `internal/pc` modules are `implemented`; M11's manual part is the checklist in `SMOKE.md`). M12 (control API for the desktop UI) is implemented (2026-10-31): the contract is `api/desktop/API.md`, the `pc` exports are in `internal/pc/API.md`. Each module's `API.md` is the source of truth; this file keeps the order of the work, the contract gaps and how each was closed. Delete it (or fold the leftovers into a `DESIGN.md`) when M12 is done.
 
 ## 0. Starting point
 
 | Module | State | Needs |
 |---|---|---|
-| `internal/pc` (root, `splitter`) | implemented (M9, M10); M12 open | all children below |
+| `internal/pc` (root; the `splitter` app is `api/desktop`) | implemented (M9, M10, M12 exports) | all children below |
 | `internal/pc/singbox` | implemented (M1) | `route` |
 | `internal/pc/lib/clashapi` | implemented (M2) | – |
 | `internal/pc/procman` | implemented (M3) | `proc`, `clock` |
@@ -195,10 +195,10 @@ Tests (all fakes, fake clock): connect → disconnect → connect (processes sto
 
 ### M12 — control API for the desktop UI
 
-Needs: M10, and a decision on G15 (where the API lives). Contract first: write the endpoint list into the chosen module's `API.md` and get it approved before coding.
+Needs: M10, and a decision on G15 (where the API lives: decided, `api/desktop`). Contract first: the full contract (listener, auth, endpoints, events, errors, proposed `pc` exports, tests, open questions) is written in `api/desktop/API.md`, section "Control API (M12)". It is **approved (human, 2026-10-31; all nine open questions decided as recommended)**. The bullets below are the summary; where they differ, `api/desktop/API.md` wins.
 
 - Versioned JSON under `/api/v1/`, loopback only, same hardening as M8 (Host check, no CORS, timeouts).
-- Token **required** (unlike the optional status token): `Authorization: Bearer <token>`, constant-time compare. Token handoff in v1 (G18): the UI writes a random token to a file in its own per-user directory and passes the file path as `--token-file`; `splitter` reads it once, keeps it in memory and never logs it. The UI picks the port, or passes `127.0.0.1:0` and reads the chosen port from a line `splitter` prints on stdout (decide in M12).
+- Token **required** (unlike the optional status token): `Authorization: Bearer <token>`, constant-time compare. Token handoff in v1 (G18): the UI writes a random token to a file in its own per-user directory and passes the file path as `--token-file`; `splitter` reads it once, keeps it in memory and never logs it. Proposed: `--listen 127.0.0.1:0` and one stdout line `OBHOD-API v1 <host:port>` once the app is ready (plus an optional `--addr-file`); see `api/desktop/API.md`.
 - Read: `GET /api/v1/state` (connected/disconnected/starting/stopping + the status `Snapshot`), `GET /api/v1/routes` (the current table), `GET /api/v1/processes`, `GET /api/v1/logs?name=` (procman ring buffers), `GET /api/v1/version`.
 - Actions (POST, JSON body, idempotent where possible): `connect`, `disconnect`, `check-now` (optional domains → `checker.CheckNow`), `shutdown`. Later, after a separate decision: a per-domain route override and a list reload.
 - Events: `GET /api/v1/events` as Server-Sent Events (stdlib only): state changes, table changes (`route.Diff`), procman events, a traffic tick every few seconds. No full hostnames unless debug is on, same rule as the monitor.
@@ -236,10 +236,10 @@ Desktop UI (ADR 0003):
 
 | # | Module | Item | State |
 |---|---|---|---|
-| G15 | pc / status | where the control API lives | **Open:** a new child `internal/pc/control`, or extend `internal/pc/status`. An API/placement change: ask, then update `API.md` and `docs/architecture.md` |
+| G15 | pc / status | where the control API lives | **Decided (ADR 0004):** the gateway `api/desktop`, not a child of `internal/pc`. Contract: `api/desktop/API.md`. Decided (2026-10-31): keep `internal/pc/status` alongside for now, remove it after the UI ships (separate change) |
 | G16 | pc | a disconnected state (checker running, sing-box/desync stopped) | **Decided:** in M10; `run` connects at once, `run --ui` starts disconnected. Update `internal/pc/API.md` (CLI and startup order) in M10 |
 | G17 | pc | an elevated `splitter` started by the UI must die with the UI | **Decided (v1):** `--parent-pid`; when a service replaces the UAC launch, this goes away |
-| G18 | pc / control | token handoff between the UI and `splitter` | **Proposed:** `--token-file` written by the UI in its per-user directory; never on the command line itself (other processes can read command lines) |
+| G18 | pc / control | token handoff between the UI and `splitter` | **Decided 2026-10-31 (details in `api/desktop/API.md`, Auth):** `--token-file` written by the UI in its per-user directory, read once, kept in memory, never logged; never on the command line itself (other processes can read command lines); missing or empty file = exit 1 |
 
 DNS reject notification (from D1, `docs/REVIEW-DECIDE.md`):
 

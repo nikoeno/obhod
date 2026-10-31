@@ -1,0 +1,7 @@
+{
+  "name": "sing-box",
+  "lines": [
+    "INFO router started",
+    "INFO inbound/tun started"
+  ]
+}

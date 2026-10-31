@@ -25,16 +25,17 @@ import (
 
 // Exit codes of the splitter command.
 const (
-	exitOK      = 0
-	exitConfig  = 1 // config or usage error
-	exitManual  = 2 // needs admin rights or a manual setup step (the message says which)
-	exitRuntime = 3 // runtime failure
+	ExitOK      = 0
+	ExitConfig  = 1 // config or usage error
+	ExitManual  = 2 // needs admin rights or a manual setup step (the message says which)
+	ExitRuntime = 3 // runtime failure
 )
 
 // exitError carries the exit code of a failed Run.
 type exitError struct {
-	code int
-	err  error
+	code     int
+	err      error
+	commands []string // the manual setup commands of an exit-2 error (Classify: needs_setup)
 }
 
 func (e *exitError) Error() string { return e.err.Error() }
@@ -44,18 +45,21 @@ func fail(code int, format string, a ...any) error {
 	return &exitError{code: code, err: fmt.Errorf(format, a...)}
 }
 
-// exitCode maps the error of Run to the process exit code.
-func exitCode(err error) int {
+// Fail returns an error that ExitCode maps to code.
+func Fail(code int, format string, a ...any) error { return fail(code, format, a...) }
+
+// ExitCode maps the error of Run to the process exit code.
+func ExitCode(err error) int {
 	var ee *exitError
 	switch {
 	case err == nil:
-		return exitOK
+		return ExitOK
 	case errors.As(err, &ee):
 		return ee.code
 	case errors.Is(err, procman.ErrNeedsAdmin):
-		return exitManual
+		return ExitManual
 	}
-	return exitRuntime
+	return ExitRuntime
 }
 
 // State is the connection state of the App.
@@ -91,8 +95,11 @@ type Option func(*App)
 // WithLogger sets the logger; the default discards everything.
 func WithLogger(l *slog.Logger) Option { return func(a *App) { a.log = l } }
 
-func withUI(ui bool) Option        { return func(a *App) { a.ui = ui } }
-func withParentPID(pid int) Option { return func(a *App) { a.parentPID = pid } }
+// WithUI makes the app start disconnected and wait for Connect.
+func WithUI(ui bool) Option { return func(a *App) { a.ui = ui } }
+
+// WithParentPID makes Run end cleanly when the process pid exits.
+func WithParentPID(pid int) Option { return func(a *App) { a.parentPID = pid } }
 func withDeps(d *deps) Option      { return func(a *App) { a.d = d } }
 func withTunnelOutbounds(ob singbox.Outbounds) Option {
 	return func(a *App) { a.outbounds, a.haveOutbounds = ob, true }
@@ -134,6 +141,25 @@ type App struct {
 	onFatal     func(error)   // ends Run with an error
 	tunnelAddrs []netip.Addr  // resolved addresses of a host-name tunnel server
 	clashWatch  *watchedClash // the monitor's Clash API client; reports outages
+
+	// Control API state (control.go, events.go). mu guards the fields up to chkMu.
+	ready       chan struct{}
+	readyOnce   sync.Once
+	events      hub
+	ring        *LogRing
+	lastErr     *OpError
+	since       map[string]time.Time       // when each table entry got its current route
+	history     map[string][]status.Change // route changes of this run per domain, at most maxHistory
+	changeCount int                        // route changes seen so far (the "changed" of a check)
+	networks    []NetworkInfo
+	netID       string
+
+	chkMu      sync.Mutex // guards the check watcher fields below
+	chkActive  bool       // a check start was announced and its end was not
+	chkSeen    bool       // the checker showed Running since then
+	chkGrace   int
+	chkDomains []string
+	chkStart   int // changeCount when the check started
 }
 
 // opLock is a mutex whose Lock gives up when ctx ends, so a shutdown is not
@@ -187,7 +213,7 @@ type binaries struct{ singBox, desync string }
 // New builds the App and every child. Nothing is started and no file is
 // changed. With real dependencies it reads the check lists and the decision store.
 func New(cfg Config, p paths.Paths, opts ...Option) (*App, error) {
-	a := &App{cfg: cfg, p: p, log: slog.New(slog.NewTextHandler(io.Discard, nil)), state: StateDisconnected, op: newOpLock()}
+	a := &App{cfg: cfg, p: p, log: slog.New(slog.NewTextHandler(io.Discard, nil)), state: StateDisconnected, op: newOpLock(), ready: make(chan struct{})}
 	for _, o := range opts {
 		o(a)
 	}
@@ -216,6 +242,7 @@ func (a *App) setState(s State) {
 	a.state = s
 	a.mu.Unlock()
 	a.log.Info("state", "state", string(s))
+	a.publish(Event{Kind: EventState})
 }
 
 // Run starts the app and blocks until ctx is done or a fatal error happens,
@@ -232,7 +259,7 @@ func (a *App) Run(ctx context.Context) (err error) {
 	}
 	secret, err := a.d.newSecret()
 	if err != nil {
-		return fail(exitRuntime, "generate clash api secret: %v", err)
+		return fail(ExitRuntime, "generate clash api secret: %v", err)
 	}
 	a.mu.Lock()
 	a.runCtx, a.cancelRun, a.secret = ctx, cancel, secret
@@ -304,10 +331,12 @@ func (a *App) Run(ctx context.Context) (err error) {
 		}
 	}
 	if serr != nil {
-		err = fail(exitConfig, "status: %v", serr)
+		err = fail(ExitConfig, "status: %v", serr)
 		shutdown()
 		return err
 	}
+
+	a.markReady()
 
 	// Connected state: steps 3-5 of the startup order.
 	if !a.ui {
@@ -330,11 +359,13 @@ func (a *App) Run(ctx context.Context) (err error) {
 	}
 	wg.Add(1)
 	go func() { defer wg.Done(); a.logProcEvents(reloadCtx) }()
+	wg.Add(1)
+	go func() { defer wg.Done(); a.watch(reloadCtx) }()
 
 	select {
 	case <-ctx.Done():
 	case ferr := <-fatal:
-		err = fail(exitRuntime, "%v", ferr)
+		err = fail(ExitRuntime, "%v", ferr)
 	}
 	stopReload()
 	shutdown()
@@ -346,18 +377,18 @@ func (a *App) preflight(ctx context.Context) error {
 	if err != nil {
 		a.log.Warn("cannot determine admin rights", "err", err)
 	} else if !ok {
-		return fail(exitManual, "administrator rights are required (TUN and packet interception): %s", elevationHint)
+		return fail(ExitManual, "administrator rights are required (TUN and packet interception): %s", elevationHint)
 	}
 	if err := a.d.ensure(a.p); err != nil {
 		if !errors.Is(err, paths.ErrACL) {
-			return fail(exitRuntime, "create directories: %v", err)
+			return fail(ExitRuntime, "create directories: %v", err)
 		}
 		a.log.Warn("could not restrict directory permissions", "err", err)
 	}
 	if a.d.lockInstance != nil {
 		release, err := a.d.lockInstance(a.p.Run)
 		if err != nil {
-			return fail(exitRuntime, "%v", err)
+			return fail(ExitRuntime, "%v", err)
 		}
 		a.mu.Lock()
 		a.release = release
@@ -366,7 +397,7 @@ func (a *App) preflight(ctx context.Context) error {
 	if !a.haveOutbounds {
 		ob, err := loadSecrets(a.cfg.Secrets, a.p)
 		if err != nil {
-			return fail(exitConfig, "%v", err)
+			return fail(ExitConfig, "%v", err)
 		}
 		a.outbounds, a.haveOutbounds = ob, true
 	}
@@ -388,16 +419,46 @@ func (a *App) releaseInstance() {
 
 func (a *App) setTable(t route.Table) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	var changes []status.Change
+	now := a.d.clk.Now()
+	if a.since == nil {
+		a.since, a.history = map[string]time.Time{}, map[string][]status.Change{}
+	}
 	if a.table.NetworkID != "" || len(a.table.Entries) > 0 {
 		for _, c := range route.Diff(a.table, t) {
-			a.recent = append(a.recent, status.Change{Domain: c.Domain, From: c.From, To: c.To, At: a.d.clk.Now()})
+			ch := status.Change{Domain: c.Domain, From: c.From, To: c.To, At: now}
+			changes = append(changes, ch)
+			a.recent = append(a.recent, ch)
+			switch {
+			case c.To == "": // removed
+				delete(a.since, c.Domain)
+				delete(a.history, c.Domain)
+			case c.From == "": // added
+				a.since[c.Domain] = now
+			default:
+				a.since[c.Domain] = now
+				h := append(a.history[c.Domain], ch)
+				if len(h) > maxHistory {
+					h = append([]status.Change(nil), h[len(h)-maxHistory:]...)
+				}
+				a.history[c.Domain] = h
+			}
 		}
 		if n := len(a.recent); n > recentChanges {
 			a.recent = append([]status.Change(nil), a.recent[n-recentChanges:]...)
 		}
+		a.changeCount += len(changes)
+	}
+	for _, e := range t.Entries {
+		if _, ok := a.since[e.Domain]; !ok {
+			a.since[e.Domain] = now
+		}
 	}
 	a.table = t
+	a.mu.Unlock()
+	if len(changes) > 0 {
+		a.publish(Event{Kind: EventRoutes, Changes: changes})
+	}
 }
 
 func (a *App) currentTable() route.Table {
@@ -443,8 +504,12 @@ func (a *App) Connect(ctx context.Context) error {
 	if a.State() == StateConnected {
 		return nil
 	}
+	a.setLastError(nil, false) // the connecting event that follows carries the cleared error
 	a.setState(StateConnecting)
 	if err := a.connectLocked(ctx); err != nil {
+		if ctx.Err() == nil { // a connect cancelled by the caller or by shutdown is no error
+			a.setLastError(Classify(err), false) // the disconnected event below carries it
+		}
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*stepTimeout)
 		defer cancel()
 		_ = a.disconnectLocked(stopCtx)
@@ -491,7 +556,7 @@ func (a *App) connectLocked(ctx context.Context) error {
 	table := a.currentTable()
 	bins, err := a.resolveBinaries()
 	if err != nil {
-		return fail(exitConfig, "%v", err)
+		return fail(ExitConfig, "%v", err)
 	}
 	a.resolveTunnel(ctx)
 	r, err := a.render(ctx, bins, table, true)
@@ -508,7 +573,7 @@ func (a *App) connectLocked(ctx context.Context) error {
 			return err
 		}
 		if err := a.writePlanFiles(r.plan); err != nil {
-			return fail(exitRuntime, "write desync files: %v", err)
+			return fail(ExitRuntime, "write desync files: %v", err)
 		}
 		sctx, cancel := context.WithTimeout(ctx, stepTimeout)
 		err := a.d.procs.Start(sctx, a.engineSpec(r.plan))
@@ -523,7 +588,7 @@ func (a *App) connectLocked(ctx context.Context) error {
 	// sing-box.
 	cfgFile := filepath.Join(a.p.Run, singBoxFileName)
 	if err := a.stageSingBox(ctx, bins, r.singBox, cfgFile); err != nil {
-		return fail(exitConfig, "%v", err)
+		return fail(ExitConfig, "%v", err)
 	}
 	sctx, cancel := context.WithTimeout(ctx, startTimeout)
 	err = a.d.procs.Start(sctx, a.singBoxSpec(bins, cfgFile))
@@ -542,9 +607,9 @@ func (a *App) connectLocked(ctx context.Context) error {
 
 func (a *App) startError(what string, err error) error {
 	if errors.Is(err, procman.ErrNeedsAdmin) {
-		return fail(exitManual, "%s: %v: %s", what, err, elevationHint)
+		return fail(ExitManual, "%s: %w: %s", what, err, elevationHint)
 	}
-	return fail(exitRuntime, "start %s: %v", what, err)
+	return fail(ExitRuntime, "start %s: %v", what, err)
 }
 
 // checkNFT, on Linux, refuses to start when the nftables table that feeds the
@@ -559,7 +624,7 @@ func (a *App) checkNFT(ctx context.Context, plan desync.Plan) error {
 	}
 	listing, ok, err := a.d.nftTable(ctx)
 	if err != nil {
-		return fail(exitManual, "cannot check the nftables table (is nft installed?): %v", err)
+		return fail(ExitManual, "cannot check the nftables table (is nft installed?): %v", err)
 	}
 	var nftCmds, ipCmds []string // all nft commands; the ip rule commands still missing
 	hasIP := false
@@ -587,7 +652,7 @@ func (a *App) checkNFT(ctx context.Context, plan desync.Plan) error {
 		switch {
 		case errors.Is(err, errors.ErrUnsupported):
 		case err != nil:
-			return fail(exitManual, "cannot check the ip rules (is ip installed?): %v", err)
+			return fail(ExitManual, "cannot check the ip rules (is ip installed?): %v", err)
 		default:
 			if ipCmds = ipRuleMissing(rules, plan.Setup); len(ipCmds) > 0 {
 				problems = append(problems, "the ip rule that sends the engine's marked packets through the main table is missing "+
@@ -612,7 +677,8 @@ func (a *App) checkNFT(ctx context.Context, plan desync.Plan) error {
 	for _, c := range plan.Teardown {
 		b.WriteString("  " + c + "\n")
 	}
-	return &exitError{code: exitManual, err: errors.New(strings.TrimRight(b.String(), "\n"))}
+	return &exitError{code: ExitManual, err: errors.New(strings.TrimRight(b.String(), "\n")),
+		commands: append(append([]string(nil), nftCmds...), ipCmds...)}
 }
 
 func (a *App) startMonitor() {
@@ -754,6 +820,7 @@ func (a *App) singBoxFailed(ctx context.Context, cause error) {
 // reconnect, so Run ends with an error. a.op must be held.
 func (a *App) singBoxLostLocked(ctx context.Context, cause error) {
 	a.log.Error("sing-box is not running; disconnecting", "err", cause)
+	a.setLastError(crashedError(), false) // the disconnected event below carries it
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*stepTimeout)
 	defer cancel()
 	if err := a.disconnectLocked(dctx); err != nil {

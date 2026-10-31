@@ -2,8 +2,13 @@ package pc
 
 import (
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
+
+	"github.com/nikoejento/obhod/internal/lib/paths"
 )
 
 // rotator is an io.WriteCloser that writes to a file and rotates it by size:
@@ -89,4 +94,24 @@ func (r *rotator) Close() error {
 	err := r.f.Close()
 	r.f = nil
 	return err
+}
+
+// NewLogger logs to stderr and, rotated by size, to a file in Paths.Logs. The
+// returned function closes the file.
+func NewLogger(cfg LogConfig, p paths.Paths, stderr io.Writer) (*slog.Logger, func(), error) {
+	level, _ := parseLevel(cfg.Level)
+	var w io.Writer = stderr
+	closeFn := func() {}
+	if p.Logs != "" {
+		if err := os.MkdirAll(p.Logs, 0o700); err != nil {
+			return nil, nil, err
+		}
+		rot, err := newRotator(filepath.Join(p.Logs, cfg.File), int64(cfg.MaxSizeMB)<<20, cfg.MaxFiles)
+		if err != nil {
+			return nil, nil, err
+		}
+		w = io.MultiWriter(stderr, rot)
+		closeFn = func() { _ = rot.Close() }
+	}
+	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: level})), closeFn, nil
 }

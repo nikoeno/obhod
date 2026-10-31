@@ -1,6 +1,6 @@
 # Desktop UI: pages, tabs and user actions
 
-Status: draft (2026-10-25). Describes the Tauri desktop app from ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`). Nothing here is built yet; the only UI that exists today is the read-only status page (`internal/pc/status`). Every action below maps to a control API call planned in M12 (`internal/pc/PLAN.md`); actions marked **later** need a separate decision first.
+Status: draft (2026-10-25). Describes the Tauri desktop app from ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`). Nothing here is built yet; the only UI that exists today is the read-only status page (`internal/pc/status`). Every action below maps to a control API call planned in M12 (`internal/pc/PLAN.md`), served by the gateway `api/desktop` (ADR 0004); actions marked **later** need a separate decision first.
 
 Visual style: one large round accent button, neutral cards, one purple accent (`#534ab7` light / `#7f77dd` dark), system font.
 

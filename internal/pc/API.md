@@ -3,26 +3,23 @@
 | Field | Value |
 |---|---|
 | Path | internal/pc |
-| Kind | app |
-| Binary | splitter |
-| Purpose | runs the desktop app: checker, sing-box, desync engine, monitor and status page |
-| Consumers | cmd/splitter |
+| Kind | child |
+| Binary | – |
+| Purpose | composes the desktop engine: checker, sing-box, desync engine, monitor and status page |
+| Consumers | api/desktop |
 | Children | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/lib/clashapi |
 | Uses libs | internal/lib/checker, internal/lib/analyzer, internal/lib/route, internal/lib/paths, internal/lib/clock, internal/lib/version, internal/lib/netif, internal/lib/proc |
 | Build tags | – |
-| Status | implemented (control API for the UI: open, see PLAN.md M12) |
+| Status | implemented (the control API for the UI lives in api/desktop; the exports it needs are below) |
 
 ## Responsibility
 
-Composition root for the PC. It loads config, wires modules together, owns the lifecycle, and reacts to `RouteTable` changes by regenerating configs and reloading processes. It contains no domain logic of its own.
+Composition module for the PC, used by the `api/desktop` app. It loads config, wires modules together, owns the lifecycle, and reacts to `RouteTable` changes by regenerating configs and reloading processes. It contains no domain logic of its own.
 
 ## Public API
 
 ```go
 package pc
-
-// Main parses args, runs the app, and returns the exit code.
-func Main(args []string) int
 
 type Config struct {
     Paths    PathsConfig     // paths.root: put every directory under one folder
@@ -53,23 +50,107 @@ type App struct{ /* ... */ }
 
 type Option func(*App)
 func WithLogger(l *slog.Logger) Option
+func WithUI(ui bool) Option        // start disconnected and wait for Connect
+func WithParentPID(pid int) Option // Run ends cleanly when that process exits
+func WithLogRing(r *LogRing) Option // Logs("splitter") reads from r
 
 func New(cfg Config, p paths.Paths, opts ...Option) (*App, error)
 func (a *App) Run(ctx context.Context) error // blocks; clean shutdown on ctx cancel
 func (a *App) Connect(ctx context.Context) error
 func (a *App) Disconnect(ctx context.Context) error
 func (a *App) State() State // disconnected | connecting | connected | disconnecting
+
+// Control API support (used by api/desktop, ADR 0004). All methods are safe for concurrent use.
+
+// Ready is closed when the pre-flight passed, the checker runs and the status port is bound
+// (the state is Disconnected or later). If Run fails earlier it is never closed: watch Run's result too.
+func (a *App) Ready() <-chan struct{}
+func (a *App) Snapshot() status.Snapshot // what the status page shows; includes State
+
+// RouteInfo is one table entry with its per-entry data.
+type RouteInfo struct {
+    Domain    string
+    Route     route.Route
+    Source    route.Source
+    Since     time.Time       // when the entry got its current route (first table of this run if it never changed)
+    LastCheck time.Time       // last finished check cycle; global, not per domain
+    History   []status.Change // real route changes of this run, at most 10, oldest first
+}
+func (a *App) Routes() []RouteInfo // sorted by domain; empty while the table is empty
+
+type NetworkInfo struct {
+    Label string // as Snapshot.Network, never the public IP
+    Since time.Time
+}
+func (a *App) Networks() []NetworkInfo // identified networks seen this run, newest last, at most 10
+
+func (a *App) Checking() bool                   // the checker's Status().Running
+func (a *App) CheckNow(domains ...string) error // returns at once; progress arrives as check events
+var ErrUnknownDomain error                      // CheckNow: none of the domains is in the table
+
+// OpError describes a failed or interrupted transition.
+type OpError struct {
+    Code     string   // CodePermissionDenied | CodeNeedsSetup | CodeTunnelMissing | CodeCrashed | CodeConnectFailed
+    Message  string   // fixed sentence, no addresses, paths or secrets
+    Commands []string // needs_setup only; the app never runs them
+}
+func (a *App) LastError() *OpError // set when a transition fails or the connection drops, cleared when Connect starts
+func Classify(err error) *OpError  // maps an error of Connect to an OpError (never returns CodeCrashed)
+
+// Logs: LogSplitter | LogSingBox | LogDesync ("splitter", "sing-box", "desync"); ErrUnknownLog otherwise.
+func (a *App) Logs(name string) ([]string, error) // last 200 lines, never nil
+var ErrUnknownLog error
+type LogRing struct{ /* ... */ }                  // io.Writer keeping the last N lines (split at newlines)
+func NewLogRing(lines int) *LogRing
+func (r *LogRing) Lines() []string
+
+// Events. The channel has a buffer of 64; a subscriber that falls behind is dropped and its channel closed.
+func (a *App) Subscribe() (<-chan Event, func()) // the func unsubscribes (and closes the channel); never blocks the app
+type EventKind string // EventState "state" | EventRoutes "routes" | EventCheck "check" | EventTraffic "traffic"
+type Event struct {
+    Kind    EventKind
+    Changes []status.Change // routes
+    Check   CheckEvent      // check
+    Traffic TrafficTick     // traffic
+}
+type CheckEvent struct {
+    Running bool
+    Domains []string // what CheckNow was asked for (normalized); nil for all candidates or a scheduled check
+    Changed int      // route changes published while the check ran; set when Running is false
+}
+type TrafficTick struct {
+    Upload, Download int64                // sing-box totals (Clash API); 0 when it did not answer
+    Connections      int
+    Delta            map[route.Route]int64 // bytes per route since the previous tick
+    Total            map[route.Route]int64 // bytes per route since the connect (Snapshot.Traffic)
+    Savings          float64
+    At               time.Time
+}
+
+// Exit codes of the splitter command.
+const (
+    ExitOK      = 0
+    ExitConfig  = 1 // config or usage error
+    ExitManual  = 2 // needs admin rights or a manual setup step
+    ExitRuntime = 3 // runtime failure
+)
+func Fail(code int, format string, a ...any) error // an error that ExitCode maps to code
+func ExitCode(err error) int                       // exit code for the error of Run or New
+
+// Log setup: stderr plus a size-rotated file in Paths.Logs (Config.Log); the func closes the file.
+func NewLogger(cfg LogConfig, p paths.Paths, stderr io.Writer) (*slog.Logger, func(), error)
+
+// check-config: what it needs from the machine (tests replace the fields).
+type CheckEnv struct {
+    FindBinary func(name, configured string) (string, error)
+    Uplink     func(ctx context.Context) (netif.Interface, error)
+    SingCheck  func(ctx context.Context, binary, file string) error
+}
+func DefaultCheckEnv() CheckEnv // binaries next to the executable or in third_party/bin, netif.Uplink, singbox.Check
+func CheckConfig(ctx context.Context, cfg Config, p paths.Paths, env CheckEnv, out io.Writer) error
 ```
 
-CLI:
-
-```
-splitter run [--config PATH] [--ui] [--parent-pid PID]
-splitter check-config [--config PATH]
-splitter --version | --help
-```
-
-`run` connects at once. `run --ui` (used by the desktop app) starts disconnected, with the checker and the status page running, and waits for `Connect`. `--parent-pid` makes the process shut down cleanly when that process exits (an elevated process cannot join the UI's job object). `check-config` loads the config and the secrets, renders the sing-box config and the desync plan once for a table with one domain per route, and runs `sing-box check` when the binary exists; it never prints secrets. The default config is `<Config dir>/app.yaml`; `paths.root` in that file moves the other directories.
+The command line (`splitter run`, `check-config`, `--version`, `--help`, `main`) lives in `api/desktop` (ADR 0004); this module no longer parses arguments or owns a binary. In terms of the CLI, `run` connects at once. `run --ui` (used by the desktop app) starts disconnected, with the checker and the status page running, and waits for `Connect`. `--parent-pid` makes the process shut down cleanly when that process exits (an elevated process cannot join the UI's job object). `check-config` (`CheckConfig`) loads the secrets, renders the sing-box config and the desync plan once for a table with one domain per route, and runs `sing-box check` when the binary exists; it never prints secrets. The default config is `<Config dir>/app.yaml`; `paths.root` in that file moves the other directories.
 
 ## Behavior / contract
 
@@ -91,6 +172,8 @@ Network identification: the checker gets a DoH resolver (`analyzer.NewDoHResolve
 Checker probes: the checker's direct dialer is pinned to the uplink (`SO_BINDTODEVICE`, so probes never enter the TUN). The uplink is re-resolved when the binding is older than 2 s, on an uplink event, and after a failed dial (retried once when the uplink differs), so an uplink switch is picked up without waiting for another event.
 
 Shutdown runs in reverse order: status, monitor, sing-box, desync engine, checker; each step is bounded by a timeout.
+
+Control API support (see the Public API block): a `state` event carries no data of its own; the receiver reads `State`, `LastError`, `Checking`, `Snapshot` and `Networks` when it gets one. State events are sent on every state transition, when `LastError` is set or cleared (a failed `Connect` records its error before it rolls back, so the final `disconnected` event already carries it) and at the end of a check. `routes` events carry the `route.Diff` of every new table (the same changes as `Snapshot.Recent`). `check` events come from polling `checker.Status().Running` every 500 ms (plus an immediate start event from `CheckNow`, which also ends after about 4 s if the checker never showed the check as running). `traffic` events come every 2 s while connected: totals from the Clash API, per-route bytes from the monitor, aggregated only (no host, no address). The event tickers use `deps.evClk`, which is the app clock unless a test gives it its own. `Classify` maps `procman.ErrNeedsAdmin` and exit-2 errors without commands to `permission_denied`, the exit-2 error of the Linux nft/ip-rule check (it carries the commands that are still needed) to `needs_setup`, an unresolved or missing tunnel server to `tunnel_missing`, and everything else to `connect_failed`; `crashed` is recorded when sing-box is lost while connected. A connect cancelled by its caller or by shutdown records no error. `Routes` hostnames are the table's entries only (curated lists), never observed traffic.
 
 Adapters live here:
 
@@ -119,7 +202,7 @@ The Clash API secret is internal: the app generates a random one (`crypto/rand`)
 
 ## Errors
 
-Exit codes: 0 clean shutdown, 1 config/usage error, 2 needs admin or a manual setup step (printed with instructions), 3 runtime failure.
+Exit codes (`ExitCode`; the process exit is done by `api/desktop`): 0 clean shutdown, 1 config/usage error, 2 needs admin or a manual setup step (printed with instructions), 3 runtime failure.
 
 A `procman.ErrNeedsAdmin` from a child also exits 2.
 

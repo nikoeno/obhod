@@ -34,7 +34,7 @@ func TestTablePublishedDuringConnectTriggersReload(t *testing.T) {
 // In UI mode (disconnected) a published table still reaches the reload loop
 // and updates the table the next Connect starts from.
 func TestTablePublishedInUIModeIsApplied(t *testing.T) {
-	h := newHarness(t, tbl(t, ent("a.example", route.Tunnel)), withUI(true))
+	h := newHarness(t, tbl(t, ent("a.example", route.Tunnel)), WithUI(true))
 	h.start()
 	h.waitOp("status.start")
 	h.chk.publish(tbl(t, ent("a.example", route.Tunnel), ent("b.example", route.Direct)))

@@ -1,0 +1,4 @@
+{
+  "error": "Too many event streams are open.",
+  "code": "busy"
+}

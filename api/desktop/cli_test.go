@@ -1,4 +1,4 @@
-package pc
+package desktop
 
 import (
 	"bytes"
@@ -11,7 +11,18 @@ import (
 
 	"github.com/nikoejento/obhod/internal/lib/netif"
 	"github.com/nikoejento/obhod/internal/lib/paths"
+	"github.com/nikoejento/obhod/internal/pc"
 )
+
+func writeSecret(t *testing.T, p paths.Paths, name, content string) {
+	t.Helper()
+	if err := os.MkdirAll(p.Secrets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.Secrets, name), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 type fakeRunner struct {
 	err error
@@ -28,7 +39,7 @@ type cliHarness struct {
 	p      paths.Paths
 	runner *fakeRunner
 	opts   int
-	cfgIn  Config
+	cfgIn  pc.Config
 	checks []string
 	sbErr  error
 }
@@ -41,15 +52,15 @@ func newCLIHarness(t *testing.T) *cliHarness {
 		stdout:       h.out,
 		stderr:       h.errOut,
 		defaultPaths: func() (paths.Paths, error) { return h.p, nil },
-		newApp: func(cfg Config, p paths.Paths, opts ...Option) (runner, error) {
+		newApp: func(cfg pc.Config, p paths.Paths, opts ...pc.Option) (runner, error) {
 			h.cfgIn, h.opts = cfg, len(opts)
 			return h.runner, nil
 		},
 		signalCtx: func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) },
-		check: checkEnv{
-			findBinary: func(name, _ string) (string, error) { return "/bin/" + name, nil },
-			uplink:     func(context.Context) (netif.Interface, error) { return netif.Interface{Name: "eth0", Index: 2}, nil },
-			singCheck: func(_ context.Context, bin, file string) error {
+		check: pc.CheckEnv{
+			FindBinary: func(name, _ string) (string, error) { return "/bin/" + name, nil },
+			Uplink:     func(context.Context) (netif.Interface, error) { return netif.Interface{Name: "eth0", Index: 2}, nil },
+			SingCheck: func(_ context.Context, bin, file string) error {
 				h.checks = append(h.checks, bin)
 				if b, err := os.ReadFile(file); err != nil || !strings.Contains(string(b), "tunnel") {
 					return errors.New("no config to check")
@@ -92,7 +103,7 @@ func TestCLIBasics(t *testing.T) {
 	if code := h.run("frobnicate"); code != 1 || !strings.Contains(h.errOut.String(), "unknown command") {
 		t.Fatalf("unknown command: %d", code)
 	}
-	for _, args := range [][]string{{"run", "--nope"}, {"run", "extra"}, {"run", "--parent-pid", "-3"}, {"check-config", "--ui"}} {
+	for _, args := range [][]string{{"run", "--nope"}, {"run", "extra"}, {"run", "--parent-pid", "-3"}, {"check-config", "--ui"}, {"run", "--ui"}, {"run", "--token-file", "x"}, {"run", "--listen", "127.0.0.1:0"}, {"run", "--addr-file", "x"}} {
 		if code := h.run(args...); code != 1 {
 			t.Fatalf("%v: exit %d", args, code)
 		}
@@ -110,10 +121,10 @@ func TestRunExitCodes(t *testing.T) {
 		err  error
 		want int
 	}{
-		"config":  {fail(exitConfig, "bad"), 1},
-		"manual":  {fail(exitManual, "needs admin"), 2},
+		"config":  {pc.Fail(pc.ExitConfig, "bad"), 1},
+		"manual":  {pc.Fail(pc.ExitManual, "needs admin"), 2},
 		"runtime": {errors.New("boom"), 3},
-		"wrapped": {errors.Join(errors.New("x"), fail(exitManual, "y")), 2},
+		"wrapped": {errors.Join(errors.New("x"), pc.Fail(pc.ExitManual, "y")), 2},
 	} {
 		h.runner.err = c.err
 		h.errOut.Reset()
@@ -140,7 +151,7 @@ func TestRunFlagsAndConfigErrors(t *testing.T) {
 	if err := os.WriteFile(other, []byte("log:\n  level: warn\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if code := h.run("run", "--config", other, "--ui", "--parent-pid", "99"); code != 0 {
+	if code := h.run("run", "--config", other, "--parent-pid", "99"); code != 0 {
 		t.Fatalf("explicit config: exit %d, %q", code, h.errOut.String())
 	}
 	if h.cfgIn.Log.Level != "warn" {
@@ -194,8 +205,8 @@ func TestCheckConfigWithoutBinariesOrNetwork(t *testing.T) {
 	h := newCLIHarness(t)
 	h.writeConfig("")
 	writeSecret(t, h.p, "tunnel.json", goodTunnel)
-	h.cli.check.findBinary = func(name, _ string) (string, error) { return "", errors.New(name + " not found") }
-	h.cli.check.uplink = func(context.Context) (netif.Interface, error) { return netif.Interface{}, errors.New("offline") }
+	h.cli.check.FindBinary = func(name, _ string) (string, error) { return "", errors.New(name + " not found") }
+	h.cli.check.Uplink = func(context.Context) (netif.Interface, error) { return netif.Interface{}, errors.New("offline") }
 	if code := h.run("check-config"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut.String())
 	}

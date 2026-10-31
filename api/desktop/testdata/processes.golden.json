@@ -1,0 +1,17 @@
+[
+  {
+    "Name": "splitter",
+    "State": "running",
+    "Restarts": 0
+  },
+  {
+    "Name": "sing-box",
+    "State": "running",
+    "Restarts": 0
+  },
+  {
+    "Name": "desync",
+    "State": "running",
+    "Restarts": 1
+  }
+]

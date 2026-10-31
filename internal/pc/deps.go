@@ -45,6 +45,7 @@ type checkerAPI interface {
 	Table() route.Table
 	Subscribe() (<-chan route.Table, func())
 	ReportFailure(f checker.Failure)
+	CheckNow(domains ...string)
 	Status() checker.Status
 }
 
@@ -61,6 +62,7 @@ type statusRunner interface {
 // deps is everything the App touches outside itself.
 type deps struct {
 	clk        clock.Clock
+	evClk      clock.Clock // clock of the check watcher and the traffic ticker; nil: clk (tests give it its own fake)
 	checker    checkerAPI
 	procs      procRunner
 	newClash   func(baseURL, secret string) clashapi.Client

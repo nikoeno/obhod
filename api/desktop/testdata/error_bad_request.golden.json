@@ -1,0 +1,4 @@
+{
+  "error": "name must be splitter, sing-box or desync.",
+  "code": "bad_request"
+}

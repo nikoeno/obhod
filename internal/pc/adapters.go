@@ -14,6 +14,9 @@ import (
 	"github.com/nikoejento/obhod/internal/pc/status"
 )
 
+// binary is the name of the splitter executable, used for the version string.
+const binary = "splitter"
+
 // routeByTag maps a Clash connection to a route by its outbound tag, the last
 // element of its chain. The tags direct, desync, tunnel and proxy are the route
 // names; anything else counts as direct.

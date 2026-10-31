@@ -1,0 +1,35 @@
+{
+  "state": "disconnected",
+  "error": null,
+  "checking": false,
+  "snapshot": {
+    "Version": "splitter test",
+    "State": "disconnected",
+    "Network": "unknown network",
+    "LastCheck": "0001-01-01T00:00:00Z",
+    "NextCheck": "0001-01-01T00:00:00Z",
+    "Routes": {},
+    "Traffic": {},
+    "Savings": 0,
+    "Processes": [
+      {
+        "Name": "splitter",
+        "State": "running",
+        "Restarts": 0
+      },
+      {
+        "Name": "sing-box",
+        "State": "stopped",
+        "Restarts": 0
+      },
+      {
+        "Name": "desync",
+        "State": "stopped",
+        "Restarts": 0
+      }
+    ],
+    "Warnings": [],
+    "Recent": []
+  },
+  "networks": []
+}

@@ -1,6 +1,6 @@
 //go:build integration
 
-package pc
+package desktop
 
 import (
 	"bytes"
@@ -42,8 +42,8 @@ func TestCheckConfigWithPinnedSingBox(t *testing.T) {
 	c := newCLI(&out, &errOut)
 	c.defaultPaths = func() (paths.Paths, error) { return p, nil }
 	c.signalCtx = func() (context.Context, context.CancelFunc) { return context.WithCancel(context.Background()) }
-	realFind := c.check.findBinary
-	c.check.findBinary = func(name, configured string) (string, error) {
+	realFind := c.check.FindBinary
+	c.check.FindBinary = func(name, configured string) (string, error) {
 		if name == "sing-box" {
 			return pinned, nil
 		}

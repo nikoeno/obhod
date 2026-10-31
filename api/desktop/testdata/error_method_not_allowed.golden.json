@@ -1,0 +1,4 @@
+{
+  "error": "This endpoint does not accept that method.",
+  "code": "method_not_allowed"
+}

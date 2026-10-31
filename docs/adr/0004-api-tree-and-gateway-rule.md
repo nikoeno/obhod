@@ -24,7 +24,7 @@ The desktop UI (ADR 0003) talks to the engine over a local HTTP API. That API mu
 - Because gateways are leaves of the import graph (only `cmd/<binary>` imports them), they cannot be wired into modules and cannot create cycles.
 - Milestones:
   1. This ADR, rule (f) and `Uses modules` in `arch_test.go`. No gateway yet.
-  2. Move the app role out of `internal/pc`: `api/desktop` becomes the `splitter` app and wires `pc`.
+  2. Move the app role out of `internal/pc`: `api/desktop` becomes the `splitter` app and wires `pc`. Done (2026-10-30): `api/desktop` owns `Main` and the command line; `internal/pc` is `Kind: child`, used by `api/desktop`, and exports what the CLI needs.
   3. Control API (`internal/pc/PLAN.md` M12).
   4. Server-management endpoints.
-- Open: ADR 0003 point 4 and its Open list still place the control API in `splitter`/`pc`; milestone 2 updates them.
+- ADR 0003 point 4 and its Open list now place the control API in `api/desktop` (updated with milestone 2).
