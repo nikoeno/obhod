@@ -11,6 +11,10 @@ Rules for AI agents in this repo (traffic-splitter). Module details live in each
 - Import rules (enforced by `arch_test.go`): P may import Q only if (a) Q is a direct child of P; (b) Q is a `<A>/lib/<name>` root, A = P or an ancestor; (c) `cmd/<binary>` imports only the app with `Binary: <binary>`; (d) `lab/` follows (a)/(b) inside lab plus `internal/lib/<name>` roots; (e) `Kind: test-only` modules only from `_test.go` and `lab/`; (f) a module under `api/` (a gateway, `Kind: app`) may also import any module under `internal/` (children included) except its ancestors, test-only modules and other `api/` modules, each listed in `Uses modules` (no `Consumers` entry needed); nothing outside `api/` imports it except `cmd/<binary>`. Gateways only map and validate; no business logic, never log request bodies or secrets. No siblings, no parents, no reaching into children. Declared Consumers / Children / Uses libs / Uses modules must match real imports.
 - `API.md` is a contract. Changing a public signature: ask first, update `API.md` in the same change.
 
+## The UI (`ui/`)
+
+`ui/` is the Tauri desktop app (Rust in `ui/src-tauri/`, Vue 3 + TypeScript in `ui/src/`, ADR 0003). It is outside the Go module rules above (no `API.md`, no `arch_test.go`, no Go files) and has its own rules in `ui/AGENTS.md`; read that file before touching `ui/`. The Hard rules of this file still apply to it.
+
 ## General rules
 
 - Go, one module, standard library first. No global mutable state; time, network, filesystem roots and processes go behind interfaces. Network-facing or long-running code takes `context.Context`.

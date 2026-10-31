@@ -1,0 +1,8 @@
+.devpanel {
+  position: fixed; top: 16px; right: 16px; width: 300px; max-width: calc(100vw - 32px); z-index: var(--z-devpanel);
+  background: var(--bg); border: 2px dashed var(--accent); border-radius: var(--radius); padding: 12px 14px;
+  box-shadow: var(--shadow-floating); font-size: 0.9rem;
+}
+.devpanel fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 8px 0; padding: 6px 10px; }
+.dev-opt { display: flex; gap: 8px; align-items: center; padding: 3px 0; cursor: pointer; }
+.dev-opt input { accent-color: var(--accent); }

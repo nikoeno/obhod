@@ -1,6 +1,6 @@
 # Desktop UI: pages, tabs and user actions
 
-Status: draft (2026-10-25), updated 2026-10-31. Describes the Tauri desktop app from ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`). The Tauri app is not built yet. A clickable prototype of these pages exists in `ui/` (`ui/README.md`) and talks to a mock of the implemented control API (`api/desktop/API.md`: M12 and server management, milestone 4); the server-management flow (Settings → Detour server and the first-run card on Home) is **prototyped there** (2026-10-31). Every action below maps to a control API call served by the gateway `api/desktop` (ADR 0004); actions marked **later** need a separate decision first.
+Status: draft (2026-10-25), updated 2026-10-31. Describes the Tauri desktop app from ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`). The Tauri app lives in `ui/` (ADR 0003, resolved 2026-11-01; `ui/README.md`); Stage A (2026-11-01) ports the shell, Home and Settings, the other pages follow. The clickable prototype (`ui/web`, `ui/mock`) is deleted once the port is complete. It talks to a mock of the implemented control API (`api/desktop/API.md`: M12 and server management, milestone 4); the server-management flow (Settings → Detour server and the first-run card on Home) is **prototyped there** (2026-10-31). Every action below maps to a control API call served by the gateway `api/desktop` (ADR 0004); actions marked **later** need a separate decision first.
 
 Visual style: one large round accent button, neutral cards, one purple accent (`#534ab7` light / `#7f77dd` dark), system font.
 

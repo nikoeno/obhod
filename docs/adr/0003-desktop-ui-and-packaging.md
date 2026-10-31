@@ -15,7 +15,7 @@ The desktop product needs a GUI, and the user wants "one app": one download, one
    - Later: the installer (already elevated) registers `splitter` as a Windows service / systemd unit, and the UI only connects to it. No prompt per connect, and the connection survives closing the window.
 4. **Control API.** `splitter` serves, from the gateway `api/desktop` (ADR 0004), a versioned JSON API (`/api/v1/...`) on loopback only, plus an event stream for live updates. Every request needs a token. The **Rust side of the Tauri app is the only client**: the web frontend calls Tauri commands, never the API directly. So there is no CORS, and the token never reaches JavaScript.
 5. **Lifecycle.** `splitter` has an explicit *disconnected* state: the checker keeps running and the status is served, but sing-box and the desync engine are stopped. The UI's Connect/Disconnect switches between the states. `splitter run` from a terminal connects immediately (as before). When started by the UI, `splitter` starts disconnected and exits when the UI process exits (v1).
-6. The existing Go rules (`AGENTS.md`, `arch_test.go`) do not apply to the UI code. The UI lives in its own tree with its own rules (see Open).
+6. The existing Go rules (`AGENTS.md`, `arch_test.go`) do not apply to the UI code. The UI lives in `ui/` of this repo (resolved 2026-11-01, see Open) with its own rules in `ui/AGENTS.md`.
 
 ## Alternatives considered
 
@@ -35,6 +35,6 @@ The desktop product needs a GUI, and the user wants "one app": one download, one
 
 ## Open
 
-- Where the UI code lives: `ui/` in this repo (needs an `AGENTS.md` note that `ui/` is outside the Go module rules) or a separate repo.
+- ~~Where the UI code lives.~~ **Resolved (2026-11-01, human):** `ui/` in this repo. It is a Tauri v2 app (Rust in `ui/src-tauri/`, Vue 3 + TypeScript + Vite in `ui/src/`), outside the Go module rules (`AGENTS.md` has a note; `ui/AGENTS.md` holds the UI rules). The design kit stays in `ui/design/` and is imported by the app. The old clickable prototype (`ui/web`, `ui/mock`) is deleted once the port is complete.
 - Resolved by ADR 0004: the control API is a gateway module, `api/desktop`, not a child of `internal/pc`. Whether it replaces `internal/pc/status` is decided with milestone 3.
 - When to switch from "UAC prompt per connect" to a service.
