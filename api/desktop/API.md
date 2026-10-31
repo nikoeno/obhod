@@ -65,7 +65,7 @@ Done: ADR 0004 milestone 2 (the app role moved here from `internal/pc`), milesto
 
 Status: **implemented**; approved by the human on 2026-10-31, all nine open questions decided as recommended (see "Decisions" at the end). "Implementation notes" at the end of the section lists the few choices the contract left open. Server management (milestone 4) is the section after it.
 
-The only client is the Rust side of the Tauri app (ADR 0003); the web frontend never calls it. Payload shapes follow `ui/README.md` (the mock) and the Go field names of `status.Snapshot`; deviations from the mock are listed at the end of "Endpoints".
+The only client is the Rust side of the Tauri app (ADR 0003); the web frontend never calls it. Payload shapes follow the Go field names of `status.Snapshot`; the TypeScript mirror is `ui/src/backend/types.ts`. Deviations from the clickable mock the UI started from (history, removed in Stage B, 2026-11-01; see git history of `ui/web` and `ui/mock`) are listed at the end of "Endpoints".
 
 ## Command line additions
 
@@ -182,13 +182,13 @@ The Rust side also produces `permission_denied` (UAC or pkexec cancelled) and `e
 
 **shutdown**: answers 200, then cancels the run context. Open event streams get a final `shutdown` event and are closed; the listener closes after the response is flushed; `splitter` exits with 0 (or the code `pc.ExitCode` gives). A repeated call before the listener closes answers 200 again.
 
-Deviations from the mock (`ui/README.md`) that the UI must follow:
+Deviations from the old clickable mock (history; the mock is removed) that the UI follows:
 
 1. No `trafficToday` in a Route: traffic is counted per route, never per domain (monitor rule). The UI shows per-route totals from `Snapshot.Traffic` (Q6).
 2. `lastCheck` of a Route is global, not per domain (Q8).
 3. Added: Route `source`. Version has no `ui` (the UI knows its own).
 4. `shutdown` really shuts down and closes the streams.
-5. The mock-only endpoints (`/mock/*`) do not exist.
+5. The mock-only endpoints (`/mock/*`) do not exist (and the mock itself is gone). The UI's dev/test stand-in is `ui/src/dev/fakeBackend.ts`, which implements the Tauri command interface, not these HTTP endpoints.
 
 ## Events (SSE)
 
@@ -351,9 +351,9 @@ All under `/api/v1/`. Bodies are JSON with the 64 KiB limit above; no response c
 
 `httptest` against the fake engine (which mirrors the `ErrBusy` and active-server rules of `pc`): every endpoint with its codes (200 vs 202, busy, not found, bad id shapes, wrong method with `Allow`), the body rules (64 KiB, Content-Type, unknown fields, name rules), golden JSON in `testdata/` for every success and error body (updated only with `-update`), 401/403 on every server route, and a secret-leak test: a marker in the request body and in an engine that echoes it reaches no response, error body or log line, and the log shows `{id}`. The parsers, the store and the rollback are tested in `internal/pc/servers` and `internal/pc` (see their `API.md`).
 
-### `ui/` mock endpoints to add later (list only, nothing touched by this milestone)
+### UI stand-in for server management (history)
 
-`GET/POST /mock/servers`, `POST /mock/servers/{id}/activate`, `DELETE /mock/servers/{id}`, `POST /mock/servers/test`, with a mock engine that checks the link shape and returns the codes above.
+The server calls were first prototyped in the old `ui/mock` (removed in Stage B, 2026-11-01). They are now covered by `ui/src/dev/fakeBackend.ts`, which checks the link shape and returns the codes above.
 
 ## Decisions
 
@@ -365,8 +365,8 @@ Approved by the human on 2026-10-31: every question below is decided as recommen
 4. **Hostnames in `/routes`, `Recent` and `routes` events.** Read the monitor rule as: curated-list entries are fine, hostnames observed in traffic are not. Decided: keep as specified; the API then cannot reveal which sites the user actually visited.
 5. **`Version.singBox` and `desync`.** Decided: empty strings in v1 (no process is run to ask); fill from `third_party/manifest.yaml` data baked in at build time later.
 6. **Per-domain `trafficToday`.** Decided: drop it (it needs per-host accounting, against the monitor rule); the UI shows per-route totals. Say if the Sites page really needs it.
-7. **`connect` as 202 plus events** (as the mock does) instead of a blocking call. Decided: keep 202; a blocking call would hold one request for up to 45 s (`startTimeout`).
-8. **Per-domain `lastCheck`** (the mock has it). Decided: global only in v1.
+7. **`connect` as 202 plus events** (as the old mock did) instead of a blocking call. Decided: keep 202; a blocking call would hold one request for up to 45 s (`startTimeout`).
+8. **Per-domain `lastCheck`** (the old mock had it). Decided: global only in v1.
 9. **Event replay with `Last-Event-ID`.** Decided: no; a reconnect starts with a full `state` event.
 10. **`--addr-file` lifecycle.** Decided 2026-10-31: the file is removed on a clean exit (normal end, `/shutdown`, signal-driven stop) so a dead address is never left behind; a crash may still leave it. Startup deletes a pre-existing file before binding and writing.
 11. **`needs_setup` `commands`.** Decided 2026-10-31: they stay as they are, only what is still missing; no teardown commands are sent through the API.

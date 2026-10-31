@@ -1,5 +1,5 @@
 // Guards for the rules in ui/AGENTS.md: they fail when someone breaks them.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { icons, fanPaths } from './lib/icons';
@@ -62,6 +62,23 @@ describe('source rules (ui/AGENTS.md)', () => {
     expect(importers).toEqual(['src/backend/index.ts']);
     const idx = readFileSync(join(SRC, 'backend', 'index.ts'), 'utf8');
     expect(idx).toMatch(/import\.meta\.env\.DEV[\s\S]*import\('\.\.\/dev\/fakeBackend'\)/);
+  });
+
+  it('does not depend on the removed prototype (ui/web, ui/mock)', () => {
+    expect(existsSync(join(ROOT, 'web'))).toBe(false);
+    expect(existsSync(join(ROOT, 'mock'))).toBe(false);
+    const hits = sources.filter((f) => /ui\/(web|mock)\b/.test(readFileSync(f, 'utf8'))).map(rel);
+    expect(hits).toEqual([]);
+  });
+
+  it('has the five pages and no placeholder', () => {
+    const pagesDir = readdirSync(join(SRC, 'pages')).sort();
+    expect(pagesDir).toEqual(['Activity.vue', 'Help.vue', 'Home.vue', 'Settings.vue', 'Sites.vue']);
+  });
+
+  it('shows no per-site traffic (the API has none, decision 6)', () => {
+    const sites = readFileSync(join(SRC, 'pages', 'Sites.vue'), 'utf8') + readFileSync(join(SRC, 'lib', 'sitesModel.ts'), 'utf8');
+    expect(sites).not.toMatch(/traffic/i);
   });
 
   it('keeps a restrictive Tauri capability and CSP', () => {

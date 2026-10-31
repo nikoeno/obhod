@@ -29,3 +29,6 @@ export const showAddServerDialog = (onAdded?: (s: Server) => void): void => {
 export const confirmRemoveServer = (server: Server, onDone?: () => void): void => {
   ui.removeServer = { server, onDone };
 };
+
+/** On-screen view state that outlives a page (the window session): "Clear view" on Activity hides older changes only on screen. */
+export const view = reactive({ changesClearedAt: 0 });

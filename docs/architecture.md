@@ -54,7 +54,7 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 
 | Path | Kind | Consumers | Children | Status |
 |---|---|---|---|---|
-| `api/desktop` | app | cmd/splitter | – | implemented (no HTTP API yet) |
+| `api/desktop` | app | cmd/splitter | – | implemented (CLI, control API, server management) |
 | `internal/blockanalyzer` | app | cmd/blockanalyzer | – | design ready (see internal/lib/analyzer/AGENTS.md) |
 | `internal/lib/analyzer` | lib | internal/blockanalyzer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/netwatch, internal/pc, internal/pc/monitor, internal/router, lab, lab/fakeasn | internal/lib/analyzer/classify, internal/lib/analyzer/dnscheck, internal/lib/analyzer/dialer, internal/lib/analyzer/lib/verdict | design ready (see DESIGN.md, AGENTS.md) |
 | `internal/lib/analyzer/classify` | child | internal/lib/analyzer | – | design ready |

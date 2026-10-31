@@ -245,3 +245,73 @@ describe('server management in the store', () => {
     expect(store.S.engineDown).toBe(true);
   });
 });
+
+describe('data behind Sites, Activity and Help', () => {
+  it('adds the changes of a routes event to Recent without duplicates', async () => {
+    const { store } = makeStore();
+    await store.init();
+    const before = store.S.snapshot!.Recent.length;
+    const change = { Domain: 'news.example', From: 'direct', To: 'desync', At: new Date().toISOString() };
+    store.onEvent({ kind: 'routes', data: { changes: [change] } });
+    store.onEvent({ kind: 'routes', data: { changes: [change] } });
+    expect(store.S.snapshot!.Recent).toHaveLength(before + 1);
+    expect(store.S.snapshot!.Recent.at(-1)).toEqual(change);
+  });
+
+  it('the fake backend gives the pages something to show', async () => {
+    const { store, backend } = makeStore();
+    await store.init();
+    const S = store.S;
+    expect(new Set(S.routes.map((r) => r.source))).toEqual(new Set(['checked', 'default']));
+    expect(S.routes.some((r) => r.history.length > 0)).toBe(true);
+    expect(S.snapshot!.Recent.length).toBeGreaterThan(0);
+    expect(S.networks.length).toBeGreaterThan(1);
+    expect(S.snapshot!.Processes.map((p) => p.Name)).toEqual(['splitter', 'sing-box', 'desync']);
+    expect((await backend.getLogs('splitter')).lines.length).toBeGreaterThan(0);
+    expect((await backend.getVersion()).splitter).not.toBe('');
+    // No hostnames beyond the route table anywhere in the logs.
+    const hosts = new Set(S.routes.map((r) => r.domain));
+    for (const n of ['splitter', 'sing-box', 'desync'] as const) {
+      for (const line of (await backend.getLogs(n)).lines) expect(line).not.toMatch(/\b[a-z]+\.example\b/);
+    }
+    expect(hosts.size).toBeGreaterThan(5);
+  });
+
+  it('extras add Via proxy and Blocked by you sites; learning empties the table', async () => {
+    const { store, backend } = makeStore();
+    await store.init();
+    backend.dev!.setFlag('extras', true);
+    await store.refresh();
+    expect(store.routeCount('block')).toBe(2);
+    expect(store.routeCount('proxy')).toBe(1);
+    backend.dev!.setFlag('learning', true);
+    await store.refresh();
+    expect(store.S.routes).toEqual([]);
+    expect(store.S.snapshot!.Network).toBe('unknown network');
+  });
+
+  it('a crash shows the sing-box process as failed with its logs', async () => {
+    const { store, backend } = makeStore({ scenario: 'crash' });
+    await store.init();
+    await store.toggleConnection();
+    await until(() => store.S.state === 'connected');
+    await until(() => store.S.error?.code === 'crashed', 4000);
+    const sb = store.S.snapshot!.Processes.find((p) => p.Name === 'sing-box')!;
+    expect(sb.State).toBe('failed');
+    expect(sb.Restarts).toBeGreaterThan(0);
+    expect((await backend.getLogs('splitter')).lines.join('\n')).toMatch(/exited unexpectedly/);
+  });
+
+  it('traffic events fill the chart series and the totals', async () => {
+    const { store } = makeStore();
+    await store.init();
+    store.onEvent({
+      kind: 'traffic',
+      data: { uploadTotal: 10, downloadTotal: 100, connections: 3, delta: { direct: 50, tunnel: 5 }, Traffic: { direct: 50, tunnel: 5 }, Savings: 0.9, At: new Date().toISOString() },
+    });
+    expect(store.S.series.direct).toEqual([50]);
+    expect(store.S.series.desync).toEqual([0]);
+    expect(store.S.traffic).toEqual({ uploadTotal: 10, downloadTotal: 100, connections: 3 });
+    expect(store.S.snapshot!.Traffic.direct).toBe(50);
+  });
+});

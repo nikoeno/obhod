@@ -36,7 +36,7 @@ Rules for the Tauri desktop app in `ui/` (ADR 0003: Tauri v2, Rust in `src-tauri
 | Path | What |
 |---|---|
 | `design/` | tokens, copy, icons (source of truth, do not fork values) |
-| `src/` | Vue app: `backend/` (command interface), `store.ts`, `pages/`, `components/`, `dev/` (dev only) |
+| `src/` | Vue app: `backend/` (command interface), `store.ts`, `pages/` (Home, Sites, Activity, Settings, Help), `lib/` (pure view models, tested), `components/`, `styles/app.css`, `dev/` (dev only) |
 | `src-tauri/` | Rust: `token`, `http`, `sse`, `client`, `launcher`, `engine`, `commands` |
 
 Do not edit Go code or `api/`/`internal/` from here. If the contract needs a change, stop and ask.

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // App shell: navigation, header status, shared dialogs, keyboard shortcuts (docs/UI.md section 8).
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { pages, actions } from '../design/copy';
 import AddServerDialog from './components/AddServerDialog.vue';
 import Icon from './components/Icon.vue';
@@ -10,9 +10,11 @@ import SetupDialog from './components/SetupDialog.vue';
 import Toasts from './components/Toasts.vue';
 import type { IconName } from './lib/icons';
 import { toast } from './lib/toast';
+import Activity from './pages/Activity.vue';
+import Help from './pages/Help.vue';
 import Home from './pages/Home.vue';
-import Placeholder from './pages/Placeholder.vue';
 import Settings from './pages/Settings.vue';
+import Sites from './pages/Sites.vue';
 import { go, route, type PageName } from './router';
 import { useStore } from './store';
 import { showSetupDialog, ui } from './ui';
@@ -70,6 +72,12 @@ function onKey(e: KeyboardEvent): void {
   } else if (e.key.toLowerCase() === 'f') {
     e.preventDefault();
     go('sites');
+    // The search box exists once the Sites page has rendered.
+    void nextTick(() => {
+      const box = document.getElementById('site-search') as HTMLInputElement | null;
+      box?.focus();
+      box?.select();
+    });
   } else if (e.key.toLowerCase() === 'r') {
     e.preventDefault();
     if (!S.checking) {
@@ -122,10 +130,10 @@ function closeRemove(removed: boolean): void {
         <button class="btn primary" type="button" @click="store.init()">{{ pages.quit.openAgain }}</button>
       </section>
       <Home v-else-if="route.page === 'home'" />
-      <Placeholder v-else-if="route.page === 'sites'" :title="pages.sites.title" :lead="pages.sites.lead" />
-      <Placeholder v-else-if="route.page === 'activity'" :title="pages.activity.title" :lead="pages.activity.trafficLead" />
+      <Sites v-else-if="route.page === 'sites'" />
+      <Activity v-else-if="route.page === 'activity'" />
       <Settings v-else-if="route.page === 'settings'" />
-      <Placeholder v-else :title="pages.help.title" :lead="pages.help.howItWorksText" />
+      <Help v-else />
     </main>
   </div>
 

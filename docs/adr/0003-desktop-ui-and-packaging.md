@@ -35,6 +35,6 @@ The desktop product needs a GUI, and the user wants "one app": one download, one
 
 ## Open
 
-- ~~Where the UI code lives.~~ **Resolved (2026-11-01, human):** `ui/` in this repo. It is a Tauri v2 app (Rust in `ui/src-tauri/`, Vue 3 + TypeScript + Vite in `ui/src/`), outside the Go module rules (`AGENTS.md` has a note; `ui/AGENTS.md` holds the UI rules). The design kit stays in `ui/design/` and is imported by the app. The old clickable prototype (`ui/web`, `ui/mock`) is deleted once the port is complete.
+- ~~Where the UI code lives.~~ **Resolved (2026-11-01, human):** `ui/` in this repo. It is a Tauri v2 app (Rust in `ui/src-tauri/`, Vue 3 + TypeScript + Vite in `ui/src/`), outside the Go module rules (`AGENTS.md` has a note; `ui/AGENTS.md` holds the UI rules). The design kit stays in `ui/design/` and is imported by the app. The old clickable prototype (`ui/web`, `ui/mock`) was deleted in Stage B (2026-11-01) after the port; it stays in git history only. The dev stand-in without an engine is `ui/src/dev/fakeBackend.ts`.
 - Resolved by ADR 0004: the control API is a gateway module, `api/desktop`, not a child of `internal/pc`. Whether it replaces `internal/pc/status` is decided with milestone 3.
 - When to switch from "UAC prompt per connect" to a service.

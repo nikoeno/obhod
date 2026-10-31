@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Accessible tab strip (design README, Tabs). Arrow keys, Home and End move between tabs.
-import { nextTick, useId } from 'vue';
+import { nextTick, onMounted, useId } from 'vue';
 
 export interface TabItem { id: string; label: string; count?: number | string; dot?: string }
 
@@ -8,6 +8,9 @@ const props = defineProps<{ items: TabItem[]; modelValue: string; label: string 
 const emit = defineEmits<{ 'update:modelValue': [id: string] }>();
 const uid = useId();
 const tabId = (id: string): string => `${uid}-tab-${id}`;
+
+// A narrow window may hide the selected tab (a deep link such as #/sites?route=desync): bring it into view.
+onMounted(() => document.getElementById(tabId(props.modelValue))?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
 
 async function select(id: string): Promise<void> {
   emit('update:modelValue', id);

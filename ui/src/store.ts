@@ -6,6 +6,7 @@
 
 import { inject, reactive, type App, type InjectionKey } from 'vue';
 import { BackendError, type Activated, type Backend, type CheckEvent, type ConnState, type EngineEvent, type EngineErrorBody, type EngineState, type NetworkSeen, type Route, type RouteInfo, type Server, type ServerTest, type Snapshot, type TestRequest, type Traffic } from './backend/types';
+import { mergeChanges } from './lib/activityModel';
 import { errorInfo, type ErrorInfo } from './lib/errors';
 import { routes as routeCopy } from '../design/copy';
 
@@ -171,6 +172,8 @@ export function createStore(backend: Backend, deps: StoreDeps) {
         applyState(ev.data);
         break;
       case 'routes':
+        // The table is refetched; the changes themselves join the recent list at once (a state event may follow later).
+        if (S.snapshot && ev.data.changes?.length) S.snapshot.Recent = mergeChanges(S.snapshot.Recent ?? [], ev.data.changes);
         void refreshRoutes();
         break;
       case 'traffic':

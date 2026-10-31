@@ -1,6 +1,6 @@
 # Obhod design kit (from the MVP)
 
-Everything the clickable MVP (`ui/web/`) uses to look and behave the way it does, in a form the production app (Tauri + Vue + TypeScript) can import directly. Page behaviour, actions and API mapping stay in `docs/UI.md`; this folder is the visual and copy contract.
+Everything the desktop app uses to look and behave the way it does, in a form the app (Tauri + Vue + TypeScript) imports directly. It was extracted from the clickable MVP that stood in `ui/web/` until Stage B (2026-11-01); that MVP is deleted and lives in git history only. Page behaviour, actions and API mapping stay in `docs/UI.md`; this folder is the visual and copy contract.
 
 | File | What | Use in production |
 |---|---|---|
@@ -10,7 +10,7 @@ Everything the clickable MVP (`ui/web/`) uses to look and behave the way it does
 | `copy.ts` | Every user-facing sentence: route words, button states, error sentences, page text, tray | Seed for the i18n messages (vue-i18n); keep the keys |
 | `icons/` | Nav icons (24×24, stroke 1.8, `currentColor`), power icon, the Home "fan", app icon | Inline as Vue SFC icons or via `vite-svg-loader` |
 
-If a value here and `ui/web/style.css` disagree, the MVP wins until this kit is updated.
+Source of truth: the tokens are `tokens.json` (DTCG), `tokens.css` and `tokens.ts`, which must agree with each other; component styling is `ui/src/styles/app.css`, built only from those tokens. If a component value in `app.css` and this README disagree, fix the one that is wrong and keep both in step.
 
 ## 1. Principles
 
@@ -146,7 +146,7 @@ Ellipsis is the single character "…" in labels ("Starting…", "Export diagnos
 
 ## 10. Porting notes (Vue + Tauri)
 
-- `ui/web/api.js` is the only engine client; in production its functions become Tauri `invoke` commands and SSE becomes Tauri events (the Rust side holds the token, ADR 0003). Keep the payload shapes from `ui/README.md`.
-- `ui/web/store.js` maps naturally to a Pinia store (state, snapshot, routes, live traffic, checking flag).
-- The MVP stores UI settings in `localStorage`; production stores them on the Rust side (autostart, tray behaviour need it anyway).
-- Not designed in the MVP: tray icon variants, first-run screens, OS notifications, diagnostics export UI, Russian copy (the language list shows "Русский (later)").
+- Ported (Stage A and B): the engine client is the Rust side; the frontend calls Tauri `invoke` commands and listens to one Tauri event (`ui/src/backend/`; the Rust side holds the token, ADR 0003). Payload shapes are `ui/src/backend/types.ts` and `api/desktop/API.md`.
+- The store is `ui/src/store.ts` (Vue reactivity, no Pinia): state, snapshot, routes, live traffic series, checking flag.
+- UI settings are in `localStorage` for now; they move to the Rust side (autostart, tray behaviour need it anyway).
+- Not designed yet: tray icon variants, first-run screens, OS notifications, diagnostics export UI, Russian copy (the language list shows "Русский (later)").

@@ -1,5 +1,5 @@
 /* Obhod design tokens as CSS custom properties. Source of truth: tokens.json.
-   Extracted from the MVP (ui/web/style.css). Import once at the app root.
+   Extracted from the clickable MVP (deleted in Stage B; git history only). Import once at the app root.
    Theme: follows the OS; force one with <html data-theme="light|dark">. */
 
 :root {

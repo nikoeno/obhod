@@ -1,4 +1,4 @@
-// Obhod user-facing copy from the MVP (ui/web/words.js and the pages), as typed data.
+// Obhod user-facing copy from the clickable MVP (deleted in Stage B, 2026-11-01), as typed data.
 // English only today; keep keys stable so these become the i18n source (e.g. vue-i18n).
 // Rule: no network words on main surfaces. Engine names (direct, tunnel, ...) appear only in Details.
 

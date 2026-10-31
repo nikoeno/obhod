@@ -96,7 +96,10 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
   let checking = false;
   let engineRunning = scenario !== 'engine-unreachable';
   let network = 'Home Wi-Fi (Example ISP)';
-  let networks = [{ label: network, since: new Date().toISOString() }];
+  let networks = [
+    { label: 'Office network', since: new Date(Date.now() - 3 * 3600000).toISOString() },
+    { label: network, since: new Date(Date.now() - 40 * 60000).toISOString() },
+  ];
   let routes: RouteInfo[] = [];
   let servers: Server[] = [];
   let recent: Change[] = [];
@@ -106,11 +109,29 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
   const handlers = new Set<(e: EngineEvent) => void>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let ticker: ReturnType<typeof setInterval> | null = null;
-  const logsText: Record<LogName, string[]> = {
-    splitter: ['splitter: started (fake)', 'checker: first pass finished'],
-    'sing-box': ['sing-box: started (fake)'],
-    desync: ['desync: started (fake)'],
-  };
+  const stamp = (min: number): string => new Date(Date.now() - min * 60000).toISOString().slice(11, 19);
+  /** Plausible log lines that follow the scenario. No host names, addresses or secrets. */
+  function logLines(name: LogName): string[] {
+    const crashed = error?.code === 'crashed';
+    switch (name) {
+      case 'splitter':
+        return [
+          `${stamp(9)} info  app: control API ready (fake)`,
+          `${stamp(8)} info  checker: network identified`,
+          `${stamp(8)} info  checker: first pass finished, ${routes.length} sites`,
+          ...(state === 'connected' || crashed ? [`${stamp(6)} info  pc: connected`] : []),
+          ...(crashed ? [`${stamp(1)} error pc: sing-box exited unexpectedly`] : []),
+          ...(error?.code === 'needs_setup' ? [`${stamp(1)} error pc: nft table inet splitter is missing`] : []),
+          ...(error?.code === 'tunnel_missing' ? [`${stamp(1)} error pc: no active detour server`] : []),
+        ];
+      case 'sing-box':
+        return state === 'connected' || crashed
+          ? [`${stamp(6)} info  sing-box: started (fake)`, `${stamp(6)} info  outbound/tunnel: ready`, ...(crashed ? [`${stamp(1)} fatal sing-box: stopped (fake)`] : [])]
+          : [];
+      default:
+        return state === 'connected' || crashed ? [`${stamp(6)} info  desync: started (fake)`, `${stamp(6)} info  desync: 3 profiles loaded`] : [];
+    }
+  }
 
   function later(fn: () => void, ms: number): void {
     const t = setTimeout(() => {
@@ -120,17 +141,38 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     timers.add(t);
   }
 
+  const ago = (min: number): string => new Date(Date.now() - min * 60000).toISOString();
+
+  /** A site that moved before: `since` is when it got its path, `history` how it got there. */
+  const MOVED: Record<string, { minutesAgo: number; from: Route; source?: string }> = {
+    'video.example': { minutesAgo: 2 * 24 * 60, from: 'direct' },
+    'social.example': { minutesAgo: 190, from: 'direct' },
+    'music.example': { minutesAgo: 45, from: 'direct' },
+    'wiki.example': { minutesAgo: 8, from: 'desync' },
+    // Not checked on this network yet: the engine's safe default.
+    'chat.example': { minutesAgo: 3, from: 'direct', source: 'default' },
+  };
+
   function seed(): void {
-    const now = new Date().toISOString();
     const list = [...DOMAINS, ...(flags.extras ? EXTRA_DOMAINS : [])];
     routes = flags.learning
       ? []
-      : list.map(([domain, route]) => ({ domain, route, source: route === 'block' || route === 'proxy' ? 'static' : 'checked', since: now, lastCheck: now, history: [] }));
+      : list.map(([domain, route], i) => {
+          const m = MOVED[domain];
+          const at = m ? ago(m.minutesAgo) : ago(60 * 24 * (1 + (i % 4)));
+          const history: Change[] = m ? [{ Domain: domain, From: m.from, To: route, At: at }] : [];
+          const source = m?.source ?? (route === 'block' || route === 'proxy' ? 'static' : 'checked');
+          return { domain, route, source, since: at, lastCheck: ago(5), history };
+        });
+    recent = routes
+      .flatMap((r) => r.history)
+      .filter((c) => Date.now() - Date.parse(c.At) < 24 * 60 * 60000)
+      .sort((a, b) => Date.parse(a.At) - Date.parse(b.At));
     if (scenario === 'no-server') servers = [];
     else if (!servers.length) {
       servers = [
-        { id: idFrom(1), name: 'Server 1', protocol: 'vless', engine: 'singbox', host: '192.0.2.10', port: 443, active: true, addedAt: now },
-        { id: idFrom(2), name: 'Backup', protocol: 'trojan', engine: 'singbox', host: '198.51.100.7', port: 8443, active: false, addedAt: now },
+        { id: idFrom(1), name: 'Server 1', protocol: 'vless', engine: 'singbox', host: '192.0.2.10', port: 443, active: true, addedAt: new Date().toISOString() },
+        { id: idFrom(2), name: 'Backup', protocol: 'trojan', engine: 'singbox', host: '198.51.100.7', port: 8443, active: false, addedAt: new Date().toISOString() },
       ];
       seq = 3;
     }
@@ -139,6 +181,16 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
 
   function emit(e: EngineEvent): void {
     for (const h of [...handlers]) h(e);
+  }
+
+  function processes(): ProcessInfo[] {
+    const up = state === 'connected';
+    const crashed = error?.code === 'crashed';
+    return [
+      { Name: 'splitter', State: 'running', Restarts: 0 },
+      { Name: 'sing-box', State: up ? 'running' : crashed ? 'failed' : 'stopped', Restarts: crashed ? 3 : 0 },
+      { Name: 'desync', State: up ? 'running' : 'stopped', Restarts: 0 },
+    ];
   }
 
   function snapshot(): Snapshot {
@@ -154,11 +206,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
       Routes: counts,
       Traffic: { ...sent },
       Savings: total > 0 ? (sent.direct! + sent.desync!) / total : 0,
-      Processes: [
-        { Name: 'splitter', State: 'running', Restarts: 0 },
-        { Name: 'sing-box', State: state === 'connected' ? 'running' : 'stopped', Restarts: 0 },
-        { Name: 'desync', State: state === 'connected' ? 'running' : 'stopped', Restarts: 0 },
-      ],
+      Processes: processes(),
       Warnings: flags.warnings ? ['IPv6 is not available on this network', 'The detour server is slower than usual'] : [],
       Recent: recent.slice(-20),
     };
@@ -284,11 +332,11 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     },
     async getLogs(name: LogName): Promise<Logs> {
       live();
-      return { name, lines: [...logsText[name]] };
+      return { name, lines: logLines(name) };
     },
     async getVersion(): Promise<Version> {
       live();
-      return { splitter: 'splitter fake', singBox: '', desync: '', api: 'v1' };
+      return { splitter: 'splitter fake', singBox: 'sing-box 1.0.0 (fake)', desync: flags.learning ? '' : 'zapret2 1.0 (fake)', api: 'v1' };
     },
     async connect(): Promise<Ack> {
       live();

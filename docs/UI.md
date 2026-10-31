@@ -1,6 +1,6 @@
 # Desktop UI: pages, tabs and user actions
 
-Status: draft (2026-10-25), updated 2026-10-31. Describes the Tauri desktop app from ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`). The Tauri app lives in `ui/` (ADR 0003, resolved 2026-11-01; `ui/README.md`); Stage A (2026-11-01) ports the shell, Home and Settings, the other pages follow. The clickable prototype (`ui/web`, `ui/mock`) is deleted once the port is complete. It talks to a mock of the implemented control API (`api/desktop/API.md`: M12 and server management, milestone 4); the server-management flow (Settings → Detour server and the first-run card on Home) is **prototyped there** (2026-10-31). Every action below maps to a control API call served by the gateway `api/desktop` (ADR 0004); actions marked **later** need a separate decision first.
+Status: draft (2026-10-25), updated 2026-11-01. Describes the Tauri desktop app from ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`). The Tauri app lives in `ui/` (ADR 0003, resolved 2026-11-01; `ui/README.md`); Stage A (2026-11-01) ported the shell, Home and Settings and Stage B (2026-11-01) ported Sites, Activity and Help; all five pages are built in `ui/src/pages/`. The old clickable prototype (`ui/web`, `ui/mock`) was deleted after the port and lives in git history only. Without an engine the app runs against the in-memory fake backend (`npm run dev`, `ui/src/dev/fakeBackend.ts`), which follows the implemented control API (`api/desktop/API.md`: M12 and server management, milestone 4). The server-management flow (Settings → Detour server and the first-run card on Home) was **prototyped first** (2026-10-31) and is built. Every action below maps to a control API call served by the gateway `api/desktop` (ADR 0004); actions marked **later** need a separate decision first.
 
 Visual style: one large round accent button, neutral cards, one purple accent (`#534ab7` light / `#7f77dd` dark), system font.
 
@@ -107,6 +107,8 @@ User actions:
 
 Empty state (no network identified yet): "Still learning this network. Sites will appear in a few seconds."
 
+Built (Stage B, 2026-11-01): rows are sorted by domain; the tab counts come from the table; Via proxy and Blocked by you tabs appear only when non-empty. Deep links: `#/sites?route=<route>` (Home cards), `#/sites?domain=<d>&q=<d>` (a change on Activity opens that site's panel). **Check all again** and **Check this site again** use `check-now`; the result arrives as a `check` event and a toast. **Add a site** and **Always use…** are disabled with a "later" badge. Esc closes the panel and returns focus to the row; Ctrl+F focuses the search box.
+
 ### 5.3 Activity
 
 What happened recently. Tabs:
@@ -119,6 +121,8 @@ What happened recently. Tabs:
 | Warnings | full list of current warnings with a plain explanation and a suggested action each | `Snapshot.Warnings` |
 
 User actions: switch tabs, click a change to open that site in Sites, **Clear view** (clears only the on-screen timeline, not any data).
+
+Built (Stage B, 2026-11-01): Changes shows `Snapshot.Recent` (the last 20 from the engine) plus the changes of `routes` events, newest first, capped at 50 on screen. Traffic shows the totals of the last `traffic` event and one chart per path (30 samples of 2 s, one shared scale; Via proxy only when it has traffic); the numbers are per path, never per host. Network lists the label, last and next check, and the networks seen this session (labels only). Warnings lists each warning with a plain explanation and one suggested action; below it the **engine processes** with their states (the same list as Help). Everything shows "The engine is not running." while the engine is down.
 
 ### 5.4 Settings
 
@@ -140,8 +144,10 @@ Bottom of every tab: **Quit Obhod** (stops the engine and exits).
 | Short "How it works" (the three paths, same cards as Home) | – |
 | **Open logs folder** | opens `Paths.Logs` in the file manager |
 | **Show engine log** | read-only viewer with tabs per process: splitter, sing-box, desync engine; **Copy** button | `GET logs?name=` |
-| **Export diagnostics…** | saves a zip (version, state, warnings, process states, last log lines) to a place the user picks; host names stripped unless debug is on; nothing is uploaded | |
+| **Export diagnostics…** | saves a zip (version, state, warnings, process states, last log lines) to a place the user picks; host names stripped unless debug is on; nothing is uploaded | **not built:** the UI is not designed (section 12, question 9) |
 | **Recovery** | link to the steps in `docs/RECOVERY.md`, shown in-app | |
+
+Built (Stage B, 2026-11-01): Help shows the three path cards, the engine processes with their states (`Snapshot.Processes`, live), the log viewer inline (**Show engine log**, tabs splitter / sing-box / desync engine, **Refresh**, **Copy**; `GET logs?name=`), the versions (UI, `splitter`, sing-box, desync engine, control API; `GET version`), buttons to Settings → Detour server / Advanced / About, and the Windows recovery steps. **Open logs folder** is disabled with a "later" badge (no command opens a folder yet); **Export diagnostics…** is not shown.
 
 ## 6. First run
 
@@ -231,9 +237,15 @@ The web frontend calls Tauri commands only; the Rust side is the only API client
 
 1. ~~**Importing the server file.**~~ **Answered (2026-10-31, ADR 0004 milestone 4):** the engine owns secret writing. The UI sends the pasted link or JSON with `POST /servers`; `splitter` stores it under `Paths.Secrets/servers`, copies the active server to the `tunnel` file and never returns a secret. The installer step and a UI-written secrets file are dropped. The `proxy` outbound is not covered in v1.
 2. **Editing Advanced settings.** Does the UI write `app.yaml`, or does the API get a config endpoint? Today no endpoint changes config.
-3. **"Configure nothing" vs "add a server link".** The reference design promises no setup; a detour server is still required. The "import a server file" half is **answered (2026-10-31, ADR 0004 milestone 4):** the user pastes a link and the engine stores it (question 1). **Still open:** is "Skip for now" (Everyday + Picky only) an acceptable default? The prototype only hides the first-run card and shows a banner, because the engine cannot run without a server today: `connect` answers `tunnel_missing`. A real Everyday + Picky only mode (sing-box without the tunnel outbound) needs an engine decision; until then Skip only postpones the setup.
+3. **"Configure nothing" vs "add a server link".** The reference design promises no setup; a detour server is still required. The "import a server file" half is **answered (2026-10-31, ADR 0004 milestone 4):** the user pastes a link and the engine stores it (question 1). **Still open:** is "Skip for now" (Everyday + Picky only) an acceptable default? The app (like the prototype before it) only hides the first-run card and shows a banner, because the engine cannot run without a server today: `connect` answers `tunnel_missing`. A real Everyday + Picky only mode (sing-box without the tunnel outbound) needs an engine decision; until then Skip only postpones the setup.
 4. **Per-domain overrides and adding sites** (PLAN.md §3): which page they live on once decided (proposed: Sites side panel).
 5. **DNS reject notices** (G19): if built, show them under Activity → Warnings.
 6. **Service mode** (ADR 0003 decision 3, later): removes the UAC prompt per Start and lets the connection survive Quit; the Quit wording and first-run step 3 change then.
 7. Localisation: which languages ship in v1.
-8. **Server list details the prototype had to guess** (2026-10-31, all open): (a) servers cannot be renamed or edited (the API has no call; remove and add again); (b) **Test** is offline, so the dialog says "Looks fine" but cannot say the server is reachable (no latency, decision 20); (c) the full first-run wizard (Welcome, Detour server, Permission note, Done) is not prototyped, only the Detour card on Home; (d) with several servers, Home shows no name of the active one (could go in the Network line or the subtitle); (e) the address reveal is per session and not remembered; (f) the "Active" wording on the list versus "In use" in the docs; (g) whether a failed switch (`connect_failed` while On) should clear itself, today the banner stays until the next Start because the engine clears the error only then.
+8. **Server list details the prototype had to guess and the app kept** (2026-10-31, all open): (a) servers cannot be renamed or edited (the API has no call; remove and add again); (b) **Test** is offline, so the dialog says "Looks fine" but cannot say the server is reachable (no latency, decision 20); (c) the full first-run wizard (Welcome, Detour server, Permission note, Done) is not prototyped, only the Detour card on Home; (d) with several servers, Home shows no name of the active one (could go in the Network line or the subtitle); (e) the address reveal is per session and not remembered; (f) the "Active" wording on the list versus "In use" in the docs; (g) whether a failed switch (`connect_failed` while On) should clear itself, today the banner stays until the next Start because the engine clears the error only then.
+9. **Diagnostics export** (2026-11-01, open): the zip is described in section 5.5 but has no designed UI (where it is saved, what the user sees while it is made, whether log lines are redacted by the UI or by the engine). Stage B leaves it out. Needs a decision before a Rust command is added.
+10. **Open logs folder** (2026-11-01, open): needs a Tauri command that opens `Paths.Logs` in the file manager, and the engine does not report that path through the API. Shown disabled with "later" for now.
+11. **Processes on Activity or only on Help?** (2026-11-01, open): Stage B shows the process list on Help and, under Activity → Warnings, as "Engine processes" because a stopped or failed process is the most useful thing to see next to a warning. If Activity should keep exactly the four tabs of section 5.3 with no process list, remove it there.
+12. **Order of the Sites list** (2026-11-01, open): sorted by domain so rows do not jump when a check moves a site. Alternatives: most recently changed first, or grouped by path.
+13. **Recovery steps are Windows only** (2026-11-01, open): the Help text is the PowerShell version; on Linux it only points to `docs/RECOVERY.md`. Decide whether Help shows the steps of the running OS.
+14. **"Today" traffic after a restart** (2026-11-01, open): the path cards and charts show `Snapshot.Traffic`, and the copy says "today". `api/desktop/API.md` does not say whether the counters restart with the engine or follow the calendar day; check it, and change the copy to "this session" if they restart.
