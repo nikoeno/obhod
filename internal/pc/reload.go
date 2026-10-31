@@ -181,6 +181,10 @@ func (a *App) reloadLoop(ctx context.Context, tables <-chan route.Table) {
 			if retry := a.reload(ctx); retry > 0 {
 				arm(retry)
 			}
+		case <-a.kick: // a server was activated while connected: apply it now
+			if retry := a.reload(ctx); retry > 0 {
+				arm(retry)
+			}
 		}
 	}
 }
@@ -200,15 +204,25 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 
 	t := a.d.checker.Table()
 	a.setTable(t)
+	if len(a.outbounds.Tunnel) == 0 {
+		return 0 // no tunnel server yet (UI first run): nothing to render
+	}
 	bins, err := a.resolveBinaries()
 	if err != nil {
 		a.log.Error("reload", "err", err)
 		return 0
 	}
 	connected := a.State() == StateConnected
+	act := a.pendingActivation() // a server activated while connected, not applied yet
+	if !connected {
+		act = nil
+	}
 	r, err := a.render(ctx, bins, t, connected)
 	if err != nil {
 		a.log.Error("reload: generate", "err", err)
+		if act != nil {
+			a.rollbackActivation(act)
+		}
 		return 0
 	}
 	cfgFile := filepath.Join(a.p.Run, singBoxFileName)
@@ -225,6 +239,9 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 	cand, err := a.prepareSingBox(ctx, bins, r.singBox, cfgFile)
 	if err != nil {
 		a.log.Error("reload: new sing-box config rejected, keeping the old one", "err", err)
+		if act != nil {
+			a.rollbackActivation(act)
+		}
 		return 0
 	}
 
@@ -236,6 +253,9 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 		a.applyEngine(ctx, r.plan)
 	}
 	if cand == "" {
+		if act != nil {
+			a.clearPending() // sing-box already runs this config
+		}
 		return 0
 	}
 	a.mu.Lock()
@@ -252,11 +272,17 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 	if err := os.Rename(cfgFile, backup); err != nil && !errors.Is(err, os.ErrNotExist) {
 		_ = os.Remove(cand)
 		a.log.Error("reload: keep a copy of the sing-box config", "err", err)
+		if act != nil {
+			a.rollbackActivation(act)
+		}
 		return 0
 	}
 	if err := os.Rename(cand, cfgFile); err != nil {
 		_ = os.Rename(backup, cfgFile)
 		a.log.Error("reload: replace sing-box config", "err", err)
+		if act != nil {
+			a.rollbackActivation(act)
+		}
 		return 0
 	}
 	sctx, cancel := context.WithTimeout(ctx, startTimeout)
@@ -269,6 +295,10 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 			rctx, rcancel := context.WithTimeout(ctx, startTimeout)
 			rerr = a.d.procs.Restart(rctx, nameSingBox, a.singBoxSpec(bins, cfgFile))
 			rcancel()
+		}
+		if act != nil {
+			a.rollbackActivation(act)
+			a.reapplyEngine(ctx, bins, t) // the engine may have taken the new server's addresses
 		}
 		if rerr != nil {
 			a.singBoxLostLocked(ctx, errors.Join(err, rerr))
@@ -283,9 +313,22 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 	a.mu.Lock()
 	a.lastSBRun = a.d.clk.Now()
 	a.mu.Unlock()
+	if act != nil {
+		a.clearPending()
+	}
 	_ = os.Remove(backup)
 	a.log.Info("sing-box restarted with a new config")
 	return 0
+}
+
+// reapplyEngine renders the desync plan again from the current (restored)
+// tunnel outbound and applies it. Errors are logged.
+func (a *App) reapplyEngine(ctx context.Context, b binaries, t route.Table) {
+	r, err := a.render(ctx, b, t, true)
+	if err != nil || r.planErr != nil {
+		return
+	}
+	a.applyEngine(ctx, r.plan)
 }
 
 // applyEngine brings the engine in line with plan. Errors are logged: a

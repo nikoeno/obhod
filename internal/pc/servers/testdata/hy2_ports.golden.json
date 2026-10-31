@@ -1,0 +1,21 @@
+{
+  "protocol": "hysteria2",
+  "host": "198.51.100.9",
+  "port": 20000,
+  "engine": "singbox",
+  "name": "Hop",
+  "outbound": {
+    "password": "fake-password-1",
+    "server": "198.51.100.9",
+    "server_ports": [
+      "20000:30000",
+      "443:443"
+    ],
+    "tls": {
+      "enabled": true,
+      "insecure": true,
+      "server_name": "example.com"
+    },
+    "type": "hysteria2"
+  }
+}

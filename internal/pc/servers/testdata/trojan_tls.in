@@ -1,0 +1,1 @@
+trojan://fake-password-1@example.com:443?sni=example.com&alpn=h2#Trojan

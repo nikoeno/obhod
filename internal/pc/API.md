@@ -7,10 +7,10 @@
 | Binary | – |
 | Purpose | composes the desktop engine: checker, sing-box, desync engine, monitor and status page |
 | Consumers | api/desktop |
-| Children | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/lib/clashapi |
+| Children | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/lib/clashapi |
 | Uses libs | internal/lib/checker, internal/lib/analyzer, internal/lib/route, internal/lib/paths, internal/lib/clock, internal/lib/version, internal/lib/netif, internal/lib/proc |
 | Build tags | – |
-| Status | implemented (the control API for the UI lives in api/desktop; the exports it needs are below) |
+| Status | implemented (the control API for the UI lives in api/desktop; the exports it needs are below, including server management, ADR 0004 milestone 4) |
 
 ## Responsibility
 
@@ -127,6 +127,49 @@ type TrafficTick struct {
     At               time.Time
 }
 
+// Server management (ADR 0004 milestone 4; the logic is in internal/pc/servers, the HTTP side in api/desktop).
+// The gateway reaches the servers types only through this alias.
+type Server = servers.Server // ID, Name, Protocol, Host, Port, Engine, AddedAt, Active; never a secret
+
+// Servers lists the stored servers, oldest first, never nil. Reads and TestServer do not wait for the lock below.
+func (a *App) Servers() ([]Server, error)
+
+// AddServer parses input (a share link or one raw sing-box outbound JSON object), runs the dry run
+// (singbox.Generate + sing-box check; without a sing-box binary only the rendering) and stores the
+// server. It is never activated, not even the first one. name is optional (1 to 60 printable characters).
+func (a *App) AddServer(ctx context.Context, input, name string) (Server, error)
+
+// ActivateServer copies the stored outbound over the tunnel secret file (atomic, 0600) and replaces the
+// cached tunnel outbound. Disconnected, or when id is already active: reloaded=false, only the file and the
+// cache change. Connected: reloaded=true is returned at once and the reload path applies it: the new
+// sing-box config is checked first, sing-box restarts once (never inside the 30 s gap: the restart waits
+// for it), and if it does not start with the new config the previous config is restarted and the
+// previous tunnel file, cached outbound and active mark are put back; LastError is then connect_failed
+// ("The new server could not be used...") and a state event is sent. A second activation while one is
+// still waiting for the gap rolls back to the last confirmed server. ErrBusy while connecting or disconnecting.
+func (a *App) ActivateServer(ctx context.Context, id string) (reloaded bool, err error)
+
+// DeleteServer removes a server. The active one: allowed while disconnected (the tunnel file is removed and
+// the next Connect answers tunnel_missing), ErrBusy while connected. ErrBusy during a connect or disconnect.
+func (a *App) DeleteServer(ctx context.Context, id string) error
+
+// TestServer is offline: parse (input) or load (id) plus the same dry run, no connection. The protocol is
+// returned whenever it is known, also with an error.
+func (a *App) TestServer(ctx context.Context, id, input string) (protocol string, err error)
+
+// Error kinds (errors.Is). The ones that come from the input carry a fixed user sentence (an UserMessage()
+// method) that names the kind of problem and never a value; no error text, log line or file other than the
+// tunnel secret and the stored server files contains a credential.
+var (
+    ErrInvalidInput        error // malformed or incomplete input, bad name, or rejected by the dry run
+    ErrUnsupportedProtocol error // a protocol, transport, cipher or option this version cannot use (including Xray-only ones)
+    ErrDuplicate           error // same protocol, host, port and credential already stored
+    ErrLimit               error // 20 servers stored
+    ErrServerNotFound      error
+    ErrInputTooLarge       error // input over 32 KiB
+    ErrBusy                error // connecting or disconnecting, or deleting the active server while connected
+)
+
 // Exit codes of the splitter command.
 const (
     ExitOK      = 0
@@ -156,7 +199,7 @@ The command line (`splitter run`, `check-config`, `--version`, `--help`, `main`)
 
 Startup order:
 
-1. Pre-flight, in this order: admin rights (exit 2 with the way to start elevated), the owner-only directories, the single-instance lock (`Paths.Run/splitter.lock`; a second app exits with code 3 instead of killing the first one's children), the secrets (the tunnel outbound from `Paths.Secrets`), `procman.CleanupStale` for `sing-box`, `winws2`, `nfqws2` (a failure is only a warning).
+1. Pre-flight, in this order: admin rights (exit 2 with the way to start elevated), the owner-only directories, the single-instance lock (`Paths.Run/splitter.lock`; a second app exits with code 3 instead of killing the first one's children), the secrets (the tunnel outbound from `Paths.Secrets`; **in UI mode a tunnel file that does not exist is not an error**: the app starts disconnected with no tunnel outbound, and `Connect` answers `tunnel_missing` until `ActivateServer` has written one. A tunnel file that exists but is not a JSON object, and a missing tunnel file without the UI, still end the start with exit code 1), `procman.CleanupStale` for `sing-box`, `winws2`, `nfqws2` (a failure is only a warning).
 2. Start the checker, subscribe to its tables, then take its first `Table` (from the store or defaults, without waiting for probes). The subscription is taken before the first `Table` and handed to the reload loop, so a table published while `Connect` runs (typically the stored decisions, about 1 s after start, once the network is identified) is not lost: it arms the first reload, 3 s after the loop starts. Bind the status port (`status.Server.Listen`): a busy port ends the start with exit code 1 before any tunnel process runs.
 3. A host-name tunnel server is resolved with the system resolver (before the TUN exists) and its addresses join the desync excludes; a failed lookup is a warning, and keeps the addresses of an earlier connect. With desync domains and no resolved address the desync plan is refused (exit code 1): `desync.exclude_ips` alone does not count as protection for a host name. Then, when the table has desync domains: `netif.Uplink` (an uplink named like our TUN counts as virtual), the desync plan, the hostlist into `Paths.Run`, then the desync engine (skipped when the plan is empty). On Linux the `inet splitter` table must exist and name the current uplink and excluded addresses (see Errors). This check (exit code 2 with the commands to apply) only fires at start when the **first** table already has desync domains. The first table normally has none (the network is not identified yet), so a missing or outdated `inet splitter` table usually shows up later, as a logged reload error with the same commands (`reload: desync engine not (re)started`); the tunnel keeps running and the engine starts on the first reload after the table is fixed.
 4. Generate the sing-box config, write it atomically into `Paths.Run`, run `sing-box check`, then start sing-box (ready when the Clash API answers). The desync engine starts **before** the TUN; this is required.
@@ -165,6 +208,8 @@ Startup order:
 Connected and disconnected: `Disconnect` stops the monitor, sing-box and the desync engine (in that order) and keeps the checker and the status page. `Connect` runs steps 3-5 again. `Connect`, `Disconnect` and reload are serialized; waiting for that lock honours the caller's context, and a `Connect` in progress is cancelled when `Run` ends, so shutdown is never held up by a UI connect.
 
 sing-box failure: when procman gives up on sing-box while connected, or a reload cannot start sing-box with either the new or the previous config, the app disconnects (the state and the status page say so) and logs the last lines sing-box wrote. In terminal mode `Run` then ends with exit code 3; with the UI it stays disconnected until the next `Connect`. When procman gives up on the desync engine, the app forgets it and the next reload starts it again. The output of every process that fails is copied to the app log.
+
+Server management and the reload path: server calls that change state (`AddServer`, `ActivateServer`, `DeleteServer`) take the same lock as `Connect`, `Disconnect` and reload (waiting honours the caller's context); `Servers` and `TestServer` read only. The tunnel outbound is read once at pre-flight and cached; `ActivateServer` replaces the cache, forgets the resolved addresses of a host-name server (the lookup is repeated at the next connect; until then a plan with desync domains is refused and the engine keeps its state, an IP-literal server is excluded at once) and, while connected, asks the reload loop to run at once. With no tunnel outbound (UI first run) the reload only keeps the table up to date.
 
 Reload: on a new table or an uplink change the loop waits 3 s (trailing debounce, on the app's clock), then regenerates both outputs. The desync engine is stopped, started or restarted when its arguments or hostlist changed (any change restarts it: whether the engine re-reads its hostlist is unverified). sing-box is restarted when the bytes of its config changed, at most once per 30 s (a restart drops every connection); a postponed reload is retried after the gap. A config that fails `sing-box check` is dropped before the engine is touched: the old file and process stay and the error is logged. A checked config replaces the old file, which is kept as `sing-box.json.old` until sing-box is ready with the new one; if sing-box does not start with the new config, the old one is put back and sing-box restarted with it. A desync plan that cannot be built (no uplink, the uplink is our TUN) leaves the engine as it is and is logged; sing-box is still updated. On Linux a plan whose nft rules changed (new uplink or tunnel address) restarts the engine only after the table matches, and the routing exemption (`ip rule`, see startup step 3) is present; until then the commands to re-apply are logged. While disconnected only the sing-box file is kept up to date; no process is touched. A change that moves a domain to or from `desync` changes both outputs, so both processes restart (the engine first); a change among `direct`, `tunnel`, `proxy` and `block` restarts sing-box only.
 
@@ -218,4 +263,4 @@ Any logic that belongs in a child or lib.
 
 ## Bootstrap
 
-Done: M0 (skeleton), M9 (config and CLI), M10 (App wiring and lifecycle). Open: M12 (control API for the desktop UI). Smoke checklist: `SMOKE.md`.
+Done: M0 (skeleton), M9 (config and CLI), M10 (App wiring and lifecycle). M12 (control API for the desktop UI) and ADR 0004 milestone 4 (server management, `servers` child) are done. Smoke checklist: `SMOKE.md`.

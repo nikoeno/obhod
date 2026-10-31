@@ -288,6 +288,8 @@ var allPaths = []struct{ method, path string }{
 	{"GET", "/api/v1/state"}, {"GET", "/api/v1/routes"}, {"GET", "/api/v1/processes"}, {"GET", "/api/v1/logs?name=splitter"},
 	{"GET", "/api/v1/version"}, {"GET", "/api/v1/events"}, {"POST", "/api/v1/connect"}, {"POST", "/api/v1/disconnect"},
 	{"POST", "/api/v1/check-now"}, {"POST", "/api/v1/shutdown"},
+	{"GET", "/api/v1/servers"}, {"POST", "/api/v1/servers"}, {"POST", "/api/v1/servers/test"},
+	{"POST", "/api/v1/servers/0000000000000001/activate"}, {"DELETE", "/api/v1/servers/0000000000000001"},
 }
 
 // ---- auth, Host, headers ----

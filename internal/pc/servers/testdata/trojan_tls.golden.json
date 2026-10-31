@@ -1,0 +1,20 @@
+{
+  "protocol": "trojan",
+  "host": "example.com",
+  "port": 443,
+  "engine": "singbox",
+  "name": "Trojan",
+  "outbound": {
+    "password": "fake-password-1",
+    "server": "example.com",
+    "server_port": 443,
+    "tls": {
+      "alpn": [
+        "h2"
+      ],
+      "enabled": true,
+      "server_name": "example.com"
+    },
+    "type": "trojan"
+  }
+}

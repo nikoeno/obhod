@@ -1,6 +1,6 @@
 # Implementation plan — pc (internal/pc)
 
-Status: M1-M11 are done (all `internal/pc` modules are `implemented`; M11's manual part is the checklist in `SMOKE.md`). M12 (control API for the desktop UI) is implemented (2026-10-31): the contract is `api/desktop/API.md`, the `pc` exports are in `internal/pc/API.md`. Each module's `API.md` is the source of truth; this file keeps the order of the work, the contract gaps and how each was closed. Delete it (or fold the leftovers into a `DESIGN.md`) when M12 is done.
+Status: M1-M11 are done (all `internal/pc` modules are `implemented`; M11's manual part is the checklist in `SMOKE.md`). M12 (control API for the desktop UI) is implemented (2026-10-31): the contract is `api/desktop/API.md`, the `pc` exports are in `internal/pc/API.md`. M13 (server management, ADR 0004 milestone 4) is implemented (2026-10-31). Each module's `API.md` is the source of truth; this file keeps the order of the work, the contract gaps and how each was closed. Delete it (or fold the leftovers into a `DESIGN.md`) when M12 is done.
 
 ## 0. Starting point
 
@@ -15,6 +15,7 @@ Status: M1-M11 are done (all `internal/pc` modules are `implemented`; M11's manu
 | `internal/pc/desync/nfqws` | implemented (M5) | – |
 | `internal/pc/monitor` | implemented (M7) | `clashapi`, `analyzer`, `route`, `clock` |
 | `internal/pc/status` | implemented (M8) | `clashapi`, `route` |
+| `internal/pc/servers` | implemented (M13) | – (the dry run is injected by `pc`) |
 | `internal/lib/checker`, `analyzer`, `route`, `netif`, `proc`, `clock`, `paths`, `version` | implemented | – |
 
 Every library the pc tree needs already exists, so the work goes bottom-up with no stubs outside `internal/pc`.
@@ -205,6 +206,15 @@ Needs: M10, and a decision on G15 (where the API lives: decided, `api/desktop`).
 - Errors: JSON `{ "error": "...", "code": "..." }` with HTTP status codes; a missing/wrong token → 401 with no body detail.
 
 Tests: `httptest` with a fake App: the token is required, actions call the right App methods, state transitions are visible on the event stream, a non-loopback listen address is rejected, no CORS headers, the SSE stream ends on shutdown. A golden JSON for each GET.
+
+### M13 — server management (ADR 0004 milestone 4)
+
+Done 2026-10-31. Contracts: `internal/pc/servers/API.md` (parsers, validation, storage, activation), `internal/pc/API.md` (exports, the cached tunnel outbound, the UI-mode pre-flight change) and `api/desktop/API.md` (endpoints, decisions 12-23). Summary of what changed in `internal/pc`:
+
+- Pre-flight in UI mode no longer fails when the `tunnel` file is missing; `Connect` answers `tunnel_missing`, the reload loop only keeps the table current. Without the UI, `run` still exits 1 as before.
+- `ActivateServer` replaces the cached tunnel outbound and the secret file; while connected it triggers the reload path through `kick`, subject to the 30 s restart gap, with a rollback of the file, the cache and the active mark when the new config is rejected or sing-box does not start (`connect_failed` in `LastError`).
+- `AddServer`, `ActivateServer` and `DeleteServer` take the op lock; `Servers` and `TestServer` do not.
+- Not done on purpose: the Xray sidecar (L11), subscription URLs, groups and failover, the `proxy` outbound, an online reachability test.
 
 ## 2. Decisions on the contract gaps
 

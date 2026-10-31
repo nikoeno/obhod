@@ -6,7 +6,7 @@ Generated from the API.md headers. docs/project-notes.md was not present when th
 
 ## 2. Rules
 
-The architecture rules (module shape, placement, import rules a-f, API.md header) are in [BOOTSTRAP.md](../BOOTSTRAP.md) section 1 and condensed in [AGENTS.md](../AGENTS.md). The `api/` tree (gateways that may import any `internal/` module, rule f) is decided in [ADR 0004](adr/0004-api-tree-and-gateway-rule.md). The first gateway is `api/desktop` (the `splitter` app); it serves no HTTP API yet (milestone 3).
+The architecture rules (module shape, placement, import rules a-f, API.md header) are in [BOOTSTRAP.md](../BOOTSTRAP.md) section 1 and condensed in [AGENTS.md](../AGENTS.md). The `api/` tree (gateways that may import any `internal/` module, rule f) is decided in [ADR 0004](adr/0004-api-tree-and-gateway-rule.md). The first gateway is `api/desktop` (the `splitter` app); it serves the control API (milestone 3) and the server-management endpoints (milestone 4).
 
 ## 3. Module tree
 
@@ -38,6 +38,7 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
       - `internal/pc/lib/clashapi`: a minimal client for sing-box's Clash-compatible API
     - `internal/pc/monitor`: watches live connections via the Clash API, detects failures and counts traffic per route
     - `internal/pc/procman`: starts, stops, restarts and supervises child processes that die with the parent
+    - `internal/pc/servers`: parses, validates, stores and activates tunnel servers (share links and raw sing-box outbound JSON)
     - `internal/pc/singbox`: generates and validates the sing-box config from a RouteTable
     - `internal/pc/status`: serves a local read-only status page with routes, network and VPS savings
   - `internal/router`: runs the checker on OpenWrt and keeps podkop's domain lists up to date
@@ -75,13 +76,14 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 | `internal/lib/route` | lib | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop, lab | – | planned |
 | `internal/lib/testca` | test-only | internal/lib/analyzer, internal/lib/faultserver, lab | – | planned |
 | `internal/lib/version` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
-| `internal/pc` | child | api/desktop | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/lib/clashapi | implemented |
+| `internal/pc` | child | api/desktop | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/lib/clashapi | implemented |
 | `internal/pc/desync` | child | internal/pc | internal/pc/desync/winws, internal/pc/desync/nfqws | implemented |
 | `internal/pc/desync/nfqws` | child | internal/pc/desync | – | implemented |
 | `internal/pc/desync/winws` | child | internal/pc/desync | – | implemented |
 | `internal/pc/lib/clashapi` | lib | internal/pc, internal/pc/monitor, internal/pc/status | – | implemented |
 | `internal/pc/monitor` | child | internal/pc | – | implemented |
 | `internal/pc/procman` | child | internal/pc | – | implemented |
+| `internal/pc/servers` | child | internal/pc | – | implemented |
 | `internal/pc/singbox` | child | internal/pc | – | implemented |
 | `internal/pc/status` | child | internal/pc | – | implemented |
 | `internal/router` | app | cmd/splitter-router | internal/router/podkop | planned |

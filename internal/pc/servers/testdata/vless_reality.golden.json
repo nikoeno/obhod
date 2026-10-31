@@ -1,0 +1,27 @@
+{
+  "protocol": "vless",
+  "host": "198.51.100.7",
+  "port": 443,
+  "engine": "singbox",
+  "name": "Reality",
+  "outbound": {
+    "flow": "xtls-rprx-vision",
+    "server": "198.51.100.7",
+    "server_port": 443,
+    "tls": {
+      "enabled": true,
+      "reality": {
+        "enabled": true,
+        "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "short_id": "0123abcd"
+      },
+      "server_name": "www.example.com",
+      "utls": {
+        "enabled": true,
+        "fingerprint": "chrome"
+      }
+    },
+    "type": "vless",
+    "uuid": "00000000-0000-4000-8000-000000000000"
+  }
+}

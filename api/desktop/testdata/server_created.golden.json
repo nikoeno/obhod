@@ -1,0 +1,10 @@
+{
+  "id": "0000000000000001",
+  "name": "Server 1",
+  "protocol": "vless",
+  "engine": "singbox",
+  "host": "192.0.2.1",
+  "port": 443,
+  "active": false,
+  "addedAt": "2026-10-31T12:01:00Z"
+}

@@ -1,0 +1,14 @@
+{
+  "protocol": "shadowsocks",
+  "host": "192.0.2.20",
+  "port": 8388,
+  "engine": "singbox",
+  "name": "SS 2022",
+  "outbound": {
+    "method": "2022-blake3-aes-128-gcm",
+    "password": "AAAAAAAAAAAAAAAAAAAAAA==",
+    "server": "192.0.2.20",
+    "server_port": 8388,
+    "type": "shadowsocks"
+  }
+}

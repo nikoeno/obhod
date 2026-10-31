@@ -24,6 +24,14 @@ type engine interface {
 	LastError() *pc.OpError
 	Logs(name string) ([]string, error)
 	Subscribe() (<-chan pc.Event, func())
+
+	// Server management (ADR 0004 milestone 4). The gateway reaches the
+	// servers types only through the pc.Server alias.
+	Servers() ([]pc.Server, error)
+	AddServer(ctx context.Context, input, name string) (pc.Server, error)
+	ActivateServer(ctx context.Context, id string) (reloaded bool, err error)
+	DeleteServer(ctx context.Context, id string) error
+	TestServer(ctx context.Context, id, input string) (protocol string, err error)
 }
 
 var _ engine = (*pc.App)(nil)

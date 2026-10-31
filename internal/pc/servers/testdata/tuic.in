@@ -1,0 +1,1 @@
+tuic://00000000-0000-4000-8000-000000000000:fake-password-1@example.com:443?congestion_control=bbr&udp_relay_mode=native&alpn=h3&sni=example.com#TUIC

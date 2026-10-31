@@ -47,6 +47,10 @@ const (
 	codeTooLarge     = "too_large"
 	codeUnreachable  = "engine_unreachable"
 	codeInternal     = "internal"
+	codeInvalidInput = "invalid_input"
+	codeUnsupported  = "unsupported_protocol"
+	codeDuplicate    = "duplicate"
+	codeLimit        = "limit_reached"
 	contentTypeJSON  = "application/json; charset=utf-8"
 	contentTypeEvent = "text/event-stream; charset=utf-8"
 )
@@ -68,7 +72,8 @@ type server struct {
 	runCtx  context.Context    // the context given to the engine's Run
 	stopRun context.CancelFunc // ends it (POST /shutdown)
 
-	routes map[string]map[string]handlerFunc
+	routes   map[string]map[string]handlerFunc
+	idRoutes map[string]map[string]handlerFunc // /servers/{id}[/suffix], keyed by the suffix ("" or "activate")
 
 	streams   atomic.Int32
 	authFails atomic.Int64
@@ -104,6 +109,13 @@ func newServer(eng engine, token string, version string, log *slog.Logger, runCt
 		apiPrefix + "/disconnect": {http.MethodPost: s.postDisconnect},
 		apiPrefix + "/check-now":  {http.MethodPost: s.postCheckNow},
 		apiPrefix + "/shutdown":   {http.MethodPost: s.postShutdown},
+
+		apiPrefix + "/servers":      {http.MethodGet: s.noBody(s.getServers), http.MethodPost: s.postServer},
+		apiPrefix + "/servers/test": {http.MethodPost: s.postServerTest},
+	}
+	s.idRoutes = map[string]map[string]handlerFunc{
+		"":         {http.MethodDelete: s.noBody(s.deleteServer)},
+		"activate": {http.MethodPost: s.postActivateServer},
 	}
 	// Streams end with a final shutdown event whatever stops the app (the
 	// shutdown endpoint, a signal, the parent process).
@@ -201,17 +213,18 @@ func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	sw := &statusWriter{ResponseWriter: w}
+	logPath := loggedPath(r.URL.Path) // a server id never reaches the log
 	defer func() {
 		if rec := recover(); rec != nil {
 			if rec == http.ErrAbortHandler {
 				panic(rec)
 			}
-			s.log.Error("handler panic", "path", r.URL.Path)
+			s.log.Error("handler panic", "path", logPath)
 			if sw.code == 0 {
 				s.writeError(sw, http.StatusInternalServerError, codeInternal, "Something went wrong inside the engine.")
 			}
 		}
-		s.log.Debug("request", "method", r.Method, "path", r.URL.Path, "status", sw.code, "duration", time.Since(start))
+		s.log.Debug("request", "method", r.Method, "path", logPath, "status", sw.code, "duration", time.Since(start))
 	}()
 
 	h := sw.Header()
@@ -235,6 +248,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	methods, ok := s.routes[r.URL.Path]
 	if !ok {
+		methods, ok = s.serverRoute(r)
+	}
+	if !ok {
 		s.writeError(sw, http.StatusNotFound, codeNotFound, "There is no such endpoint.")
 		return
 	}
@@ -253,6 +269,51 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handler(sw, r)
+}
+
+// loggedPath is the path for the request log: under /servers/ the segment
+// after it is a server id (or garbage that looks like one) and is shown as {id}.
+func loggedPath(p string) string {
+	rest, found := strings.CutPrefix(p, apiPrefix+"/servers/")
+	if !found || rest == "" || rest == "test" {
+		return p
+	}
+	_, suffix, hasSuffix := strings.Cut(rest, "/")
+	if hasSuffix {
+		return apiPrefix + "/servers/{id}/" + suffix
+	}
+	return apiPrefix + "/servers/{id}"
+}
+
+// serverRoute matches /api/v1/servers/{id} and /api/v1/servers/{id}/activate.
+// A well-formed id is stored in the request (PathValue "id"); an id of the
+// wrong shape is no route (404).
+func (s *server) serverRoute(r *http.Request) (map[string]handlerFunc, bool) {
+	rest, found := strings.CutPrefix(r.URL.Path, apiPrefix+"/servers/")
+	if !found || rest == "" {
+		return nil, false
+	}
+	id, suffix, _ := strings.Cut(rest, "/")
+	m, known := s.idRoutes[suffix]
+	if !known || !serverIDShape(id) {
+		return nil, false
+	}
+	r.SetPathValue("id", id)
+	return m, true
+}
+
+// serverIDShape is 16 lowercase hex characters; the gateway does not pass
+// anything else on as an id.
+func serverIDShape(id string) bool {
+	if len(id) != 16 {
+		return false
+	}
+	for _, c := range id {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // hostAllowed accepts only a loopback IP or "localhost" on our port, so a page

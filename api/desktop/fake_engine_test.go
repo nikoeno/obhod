@@ -32,6 +32,7 @@ type fakeEngine struct {
 	runNow   bool // Run returns runErr at once
 	checkErr error
 	logsErr  error
+	srv      srvState
 
 	// connectHook runs inside Connect (state connecting) and decides its result.
 	connectHook func(ctx context.Context) error
@@ -272,3 +273,157 @@ func (f *fakeEngine) fillFixtures() {
 }
 
 var errBoom = errors.New("boom")
+
+// ---- server management ----
+
+// userErr is an error of the kind the servers module returns: a kind for
+// errors.Is and one fixed sentence.
+type userErr struct {
+	kind error
+	msg  string
+}
+
+func (e *userErr) Error() string       { return e.msg }
+func (e *userErr) Is(t error) bool     { return t == e.kind }
+func (e *userErr) UserMessage() string { return e.msg }
+
+// srvState is the fake's server list. The rules mirror pc: ErrBusy while
+// connecting or disconnecting, the active server cannot go while connected.
+type srvState struct {
+	list   []pc.Server
+	next   int
+	lastIn string // the last input passed to AddServer or TestServer (for the leak tests)
+
+	addFn  func(input, name string) (pc.Server, error) // replaces the default Add
+	testFn func(id, input string) (string, error)      // replaces the default Test
+	err    map[string]error                            // method name -> error returned first
+}
+
+func (f *fakeEngine) setServers(list ...pc.Server) {
+	f.mu.Lock()
+	f.srv.list = list
+	f.mu.Unlock()
+}
+
+func (f *fakeEngine) failServerCall(method string, err error) {
+	f.mu.Lock()
+	if f.srv.err == nil {
+		f.srv.err = map[string]error{}
+	}
+	f.srv.err[method] = err
+	f.mu.Unlock()
+}
+
+func (f *fakeEngine) srvErr(method string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.srv.err[method]
+}
+
+func fakeServer(i int, active bool) pc.Server {
+	return pc.Server{
+		ID: fmt.Sprintf("%016x", i), Name: fmt.Sprintf("Server %d", i), Protocol: "vless", Host: fmt.Sprintf("192.0.2.%d", i), Port: 443,
+		Engine: "singbox", AddedAt: t0.Add(time.Duration(i) * time.Minute), Active: active,
+	}
+}
+
+func (f *fakeEngine) Servers() ([]pc.Server, error) {
+	f.call("Servers")
+	if err := f.srvErr("Servers"); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pc.Server{}, f.srv.list...), nil
+}
+
+func (f *fakeEngine) AddServer(_ context.Context, input, name string) (pc.Server, error) {
+	f.call("AddServer name=" + name)
+	f.mu.Lock()
+	f.srv.lastIn = input
+	add := f.srv.addFn
+	f.mu.Unlock()
+	if err := f.srvErr("AddServer"); err != nil {
+		return pc.Server{}, err
+	}
+	if add != nil {
+		return add(input, name)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.srv.list) >= 20 {
+		return pc.Server{}, &userErr{pc.ErrLimit, "The list is full (20 servers). Remove one first."}
+	}
+	f.srv.next++
+	s := fakeServer(f.srv.next, false)
+	if name != "" {
+		s.Name = name
+	}
+	f.srv.list = append(f.srv.list, s)
+	return s, nil
+}
+
+func (f *fakeEngine) find(id string) int {
+	for i, s := range f.srv.list {
+		if s.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (f *fakeEngine) ActivateServer(_ context.Context, id string) (bool, error) {
+	f.call("ActivateServer " + id)
+	if err := f.srvErr("ActivateServer"); err != nil {
+		return false, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	i := f.find(id)
+	switch {
+	case i < 0:
+		return false, pc.ErrServerNotFound
+	case f.state == pc.StateConnecting || f.state == pc.StateDisconnecting:
+		return false, pc.ErrBusy
+	case f.srv.list[i].Active:
+		return false, nil
+	}
+	for j := range f.srv.list {
+		f.srv.list[j].Active = j == i
+	}
+	return f.state == pc.StateConnected, nil
+}
+
+func (f *fakeEngine) DeleteServer(_ context.Context, id string) error {
+	f.call("DeleteServer " + id)
+	if err := f.srvErr("DeleteServer"); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	i := f.find(id)
+	switch {
+	case i < 0:
+		return pc.ErrServerNotFound
+	case f.state == pc.StateConnecting || f.state == pc.StateDisconnecting,
+		f.state == pc.StateConnected && f.srv.list[i].Active:
+		return pc.ErrBusy
+	}
+	f.srv.list = append(f.srv.list[:i:i], f.srv.list[i+1:]...)
+	return nil
+}
+
+func (f *fakeEngine) TestServer(_ context.Context, id, input string) (string, error) {
+	f.call("TestServer id=" + id)
+	f.mu.Lock()
+	f.srv.lastIn = input
+	test := f.srv.testFn
+	f.mu.Unlock()
+	if err := f.srvErr("TestServer"); err != nil {
+		return "", err
+	}
+	if test != nil {
+		return test(id, input)
+	}
+	return "vless", nil
+}

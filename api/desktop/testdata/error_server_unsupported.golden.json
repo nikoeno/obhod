@@ -1,0 +1,4 @@
+{
+  "error": "This transport is not supported by the built-in engine.",
+  "code": "unsupported_protocol"
+}

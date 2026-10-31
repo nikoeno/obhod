@@ -19,6 +19,7 @@ import (
 	"github.com/nikoejento/obhod/internal/pc/desync"
 	"github.com/nikoejento/obhod/internal/pc/lib/clashapi"
 	"github.com/nikoejento/obhod/internal/pc/procman"
+	"github.com/nikoejento/obhod/internal/pc/servers"
 	"github.com/nikoejento/obhod/internal/pc/singbox"
 	"github.com/nikoejento/obhod/internal/pc/status"
 )
@@ -118,6 +119,14 @@ type App struct {
 	outbounds     singbox.Outbounds
 	haveOutbounds bool
 
+	// Server management (servers.go). store is opened on first use; pending
+	// is the activation whose reload has not finished; kick asks the reload
+	// loop to run at once.
+	storeMu sync.Mutex
+	store   *servers.Store
+	pending *activation
+	kick    chan struct{}
+
 	// op serializes connect, disconnect and reload.
 	op opLock
 
@@ -213,7 +222,7 @@ type binaries struct{ singBox, desync string }
 // New builds the App and every child. Nothing is started and no file is
 // changed. With real dependencies it reads the check lists and the decision store.
 func New(cfg Config, p paths.Paths, opts ...Option) (*App, error) {
-	a := &App{cfg: cfg, p: p, log: slog.New(slog.NewTextHandler(io.Discard, nil)), state: StateDisconnected, op: newOpLock(), ready: make(chan struct{})}
+	a := &App{cfg: cfg, p: p, log: slog.New(slog.NewTextHandler(io.Discard, nil)), state: StateDisconnected, op: newOpLock(), ready: make(chan struct{}), kick: make(chan struct{}, 1)}
 	for _, o := range opts {
 		o(a)
 	}
@@ -395,9 +404,14 @@ func (a *App) preflight(ctx context.Context) error {
 		a.mu.Unlock()
 	}
 	if !a.haveOutbounds {
-		ob, err := loadSecrets(a.cfg.Secrets, a.p)
+		ob, err := loadSecretsFor(a.cfg.Secrets, a.p, a.ui)
 		if err != nil {
 			return fail(ExitConfig, "%v", err)
+		}
+		if len(ob.Tunnel) == 0 {
+			// UI mode, first run: no server added yet. Start disconnected;
+			// Connect answers tunnel_missing until a server is activated.
+			a.log.Info("no tunnel server file yet; starting disconnected")
 		}
 		a.outbounds, a.haveOutbounds = ob, true
 	}
@@ -545,6 +559,7 @@ func (a *App) disconnectLocked(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	a.engine = engineState{}
+	a.pending = nil // a server activated while connected stays; the next connect uses it
 	a.mu.Unlock()
 	a.setState(StateDisconnected)
 	return errors.Join(errs...)
@@ -553,6 +568,9 @@ func (a *App) disconnectLocked(ctx context.Context) error {
 // connectLocked is steps 3-5 of the startup order: the desync engine first (it
 // must be up before the TUN), then sing-box, then the monitor.
 func (a *App) connectLocked(ctx context.Context) error {
+	if len(a.outbounds.Tunnel) == 0 {
+		return fail(ExitConfig, "%w", singbox.ErrNoTunnel)
+	}
 	table := a.currentTable()
 	bins, err := a.resolveBinaries()
 	if err != nil {

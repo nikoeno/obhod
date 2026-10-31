@@ -1,0 +1,14 @@
+{
+  "protocol": "shadowsocks",
+  "host": "192.0.2.21",
+  "port": 8388,
+  "engine": "singbox",
+  "name": "Legacy",
+  "outbound": {
+    "method": "chacha20-ietf-poly1305",
+    "password": "fake-password-1",
+    "server": "192.0.2.21",
+    "server_port": 8388,
+    "type": "shadowsocks"
+  }
+}

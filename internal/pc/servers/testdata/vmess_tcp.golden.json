@@ -1,0 +1,15 @@
+{
+  "protocol": "vmess",
+  "host": "192.0.2.40",
+  "port": 10086,
+  "engine": "singbox",
+  "name": "VMess TCP",
+  "outbound": {
+    "alter_id": 0,
+    "security": "chacha20-poly1305",
+    "server": "192.0.2.40",
+    "server_port": 10086,
+    "type": "vmess",
+    "uuid": "00000000-0000-4000-8000-000000000000"
+  }
+}

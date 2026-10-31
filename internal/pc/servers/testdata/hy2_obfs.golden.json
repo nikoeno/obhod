@@ -1,0 +1,21 @@
+{
+  "protocol": "hysteria2",
+  "host": "example.com",
+  "port": 443,
+  "engine": "singbox",
+  "name": "Hysteria2",
+  "outbound": {
+    "obfs": {
+      "password": "fake-obfs-1",
+      "type": "salamander"
+    },
+    "password": "fake-password-1",
+    "server": "example.com",
+    "server_port": 443,
+    "tls": {
+      "enabled": true,
+      "server_name": "example.com"
+    },
+    "type": "hysteria2"
+  }
+}

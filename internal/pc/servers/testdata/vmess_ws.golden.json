@@ -1,0 +1,26 @@
+{
+  "protocol": "vmess",
+  "host": "example.com",
+  "port": 443,
+  "engine": "singbox",
+  "name": "VMess WS",
+  "outbound": {
+    "alter_id": 0,
+    "security": "auto",
+    "server": "example.com",
+    "server_port": 443,
+    "tls": {
+      "enabled": true,
+      "server_name": "example.com"
+    },
+    "transport": {
+      "headers": {
+        "Host": "example.com"
+      },
+      "path": "/ws",
+      "type": "ws"
+    },
+    "type": "vmess",
+    "uuid": "00000000-0000-4000-8000-000000000000"
+  }
+}

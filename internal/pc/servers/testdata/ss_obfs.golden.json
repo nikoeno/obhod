@@ -1,0 +1,16 @@
+{
+  "protocol": "shadowsocks",
+  "host": "198.51.100.21",
+  "port": 443,
+  "engine": "singbox",
+  "name": "SS obfs",
+  "outbound": {
+    "method": "aes-128-gcm",
+    "password": "fake-password-1",
+    "plugin": "obfs-local",
+    "plugin_opts": "obfs=http;obfs-host=example.com",
+    "server": "198.51.100.21",
+    "server_port": 443,
+    "type": "shadowsocks"
+  }
+}

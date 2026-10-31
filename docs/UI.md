@@ -127,7 +127,7 @@ Few settings by design. Tabs:
 | Tab | Settings / actions | Notes |
 |---|---|---|
 | General | Start the app when I sign in (on/off); Connect automatically when the app starts (on/off); Close button hides to tray (on/off); Language | UI-side settings, stored by the Tauri app |
-| Detour server | Shows whether a tunnel is configured ("Ready" / "Missing"); **Import server file…**; **Remove**; optional extra proxy: **Import proxy file…** | The file goes into `Paths.Secrets`; its contents are never shown again, never logged. Needs an API or installer step — open (section 12) |
+| Detour server | A list of servers (name, protocol; host and port hidden behind a reveal) with an **active** marker and **Use** and **Remove** per server; **Add server** (paste a link or a sing-box JSON object, optional name; **Test** checks it offline first); "Ready" / "Missing" when none is active. The optional extra proxy (`proxy` outbound) is not managed in v1 | `GET/POST /servers`, `POST /servers/{id}/activate`, `DELETE /servers/{id}`, `POST /servers/test`. The engine writes the secrets; the pasted text is never shown again and never logged. **Use** while connected restarts the tunnel once (about a second; it may wait up to 30 s after the last restart) and **Remove** of the active server needs a disconnect first |
 | Advanced | Block QUIC (on/off); Allow other DNS query types (`dns.allow_other_query_types`); log level | Each change needs a restart of the engine; the UI says so and offers **Restart now**. Writing `app.yaml` from the UI is open (section 12) |
 | About | version of the UI and of `splitter`, licenses of the bundled programs, **Check for updates** (opens the release page in the browser; no automatic network calls) | `GET version` |
 
@@ -146,7 +146,7 @@ Bottom of every tab: **Quit Obhod** (stops the engine and exits).
 ## 6. First run
 
 1. **Welcome**: one screen with the reference design (Start + three paths) and **Next**.
-2. **Detour server**: "To open blocked sites the app needs a server file from your provider." **Import file…** or **Skip for now** (then Blocked sites stay unavailable and Home shows a warning).
+2. **Detour server**: "To open blocked sites the app needs the server link from your provider." A paste field and **Add** (then **Use** is offered; a new server is never activated by itself), or **Skip for now** (then Blocked sites stay unavailable and Home shows a warning). The engine starts without a server file; **Start** answers "The detour server is not set up or cannot be reached." until one is in use.
 3. **Permission note**: "When you press Start, Windows will ask for permission. This is needed to route your traffic." (Linux: "your system will ask for your password.")
 4. **Done**: lands on Home, disconnected. Optional checkbox "Start now".
 
@@ -161,7 +161,7 @@ Bottom of every tab: **Quit Obhod** (stops the engine and exits).
 | Show window | tray click | – |
 | View logs | Help | `GET logs?name=` |
 | Export diagnostics | Help | local file only |
-| Import server/proxy file | First run, Settings | open (section 12) |
+| Add / use / remove / test a server | First run, Settings → Detour server | `POST /servers`, `POST /servers/{id}/activate`, `DELETE /servers/{id}`, `POST /servers/test` |
 | Restart engine | "no engine" state, Settings → Advanced | UI restarts the `splitter` sidecar |
 | Quit | tray, Settings | `POST shutdown`, then the UI exits |
 
@@ -201,6 +201,13 @@ Notifications (OS toasts, can be turned off in General): connected, disconnected
 | Second instance (exit 3) | "Obhod is already running." | bring the existing window to front |
 | Status/control port busy (exit 1) | "Another program is using the app's port." | Restart engine; link to Help |
 | Tunnel server missing / unresolved | "The detour server is not set up or cannot be reached." | Settings → Detour server |
+| `invalid_input` (server call) | The engine's own sentence, for example "The link has no port." (fixed sentences, never a value from the input) | fix the pasted text |
+| `unsupported_protocol` | "This kind of server is not supported." (the engine's sentence names the part: protocol, transport, cipher) | ask the provider for another link |
+| `duplicate` | "This server is already in the list." | – |
+| `limit_reached` | "The list is full (20 servers). Remove one first." | Settings → Detour server |
+| `busy` (server call) | "The engine is busy connecting or disconnecting. Try again in a moment." | retry |
+| `too_large` (server call) | "The link or JSON is too large." | check what was pasted |
+| Activation could not be applied while connected (`state.error`, `connect_failed`) | "The new server could not be used. The previous server is still in place." | pick another server |
 | sing-box gave up (disconnected after a failure) | "The connection stopped unexpectedly." | Try again; **Show engine log** |
 | API unreachable | "The engine is not running." | Restart engine |
 
@@ -215,12 +222,13 @@ Notifications (OS toasts, can be turned off in General): connected, disconnected
 | About | `GET /api/v1/version` |
 | live updates (state, table diffs, process events, traffic tick) | `GET /api/v1/events` (SSE) |
 | buttons | `POST connect`, `disconnect`, `check-now`, `shutdown` |
+| servers list, add, use, remove, offline test | `GET/POST /api/v1/servers`, `POST /api/v1/servers/{id}/activate`, `DELETE /api/v1/servers/{id}`, `POST /api/v1/servers/test` (milestone 4; no event kind, refetch the list after each call) |
 
 The web frontend calls Tauri commands only; the Rust side is the only API client and holds the token (ADR 0003, decision 4).
 
 ## 12. Open questions
 
-1. **Importing the server file.** The tunnel secret must be in `Paths.Secrets`, which is owner-only and may belong to the elevated side. Options: the UI writes it to the per-user secrets dir before connect; a new `POST secrets` action (API change); or the installer. Needs a decision.
+1. ~~**Importing the server file.**~~ **Answered (2026-10-31, ADR 0004 milestone 4):** the engine owns secret writing. The UI sends the pasted link or JSON with `POST /servers`; `splitter` stores it under `Paths.Secrets/servers`, copies the active server to the `tunnel` file and never returns a secret. The installer step and a UI-written secrets file are dropped. The `proxy` outbound is not covered in v1.
 2. **Editing Advanced settings.** Does the UI write `app.yaml`, or does the API get a config endpoint? Today no endpoint changes config.
 3. **"Configure nothing" vs "import a server file".** The reference design promises no setup; a tunnel file is still required. Is "Skip for now" (Everyday + Picky only) an acceptable default?
 4. **Per-domain overrides and adding sites** (PLAN.md §3): which page they live on once decided (proposed: Sites side panel).
