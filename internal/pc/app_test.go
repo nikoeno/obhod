@@ -387,6 +387,20 @@ func (h *harness) waitOp(op string) {
 	waitUntil(h.t, "op "+op, func() bool { return h.log.index(op) >= 0 })
 }
 
+// waitRunning waits until Run has finished starting: the status server runs,
+// the background loops (the event watcher's two tickers on h.ev) are armed and,
+// without the UI, the monitor goroutine that Connect launched has started. A
+// test that clears the op log or advances h.ev must wait for this first, or a
+// late "monitor.start" lands in its window and an Advance finds no ticker.
+func (h *harness) waitRunning() {
+	h.t.Helper()
+	h.waitOp("status.start")
+	waitUntil(h.t, "event tickers", func() bool { return h.ev.Waiters() >= 2 })
+	if !h.app.ui {
+		h.waitOp("monitor.start")
+	}
+}
+
 func (h *harness) waitCount(op string, n int) {
 	h.t.Helper()
 	waitUntil(h.t, op, func() bool { return h.log.count(op) >= n })
@@ -436,7 +450,7 @@ func baseTable(t *testing.T) route.Table {
 func TestStartupOrder(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 
 	want := []string{"checker.start", "cleanup sing-box,winws2,nfqws2", "start winws2", "start sing-box"}
 	got := h.log.all()
@@ -513,7 +527,7 @@ func contains(ss []string, s string) bool {
 func TestEmptyDesyncListMeansNoEngine(t *testing.T) {
 	h := newHarness(t, tbl(t, ent("a.example", route.Tunnel), ent("b.example", route.Direct)))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	if h.log.index("start winws2") >= 0 || h.log.index("start nfqws2") >= 0 {
 		t.Fatalf("engine started with no desync domains: %s", h.ops())
 	}
@@ -525,7 +539,7 @@ func TestEmptyDesyncListMeansNoEngine(t *testing.T) {
 func TestUIStartsDisconnectedAndConnects(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true))
 	stop := h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	if h.app.State() != StateDisconnected {
 		t.Fatalf("state = %s", h.app.State())
 	}
@@ -585,7 +599,7 @@ func TestConnectNeedsRunningApp(t *testing.T) {
 func TestConnectFailureRollsBack(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.procs.startErr[nameSingBox] = errors.New("boom")
 	err := h.app.Connect(context.Background())
 	if err == nil || ExitCode(err) != ExitRuntime {
@@ -602,7 +616,7 @@ func TestConnectFailureRollsBack(t *testing.T) {
 func TestTableChangeWhileDisconnectedRestartsNothing(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	waitUntil(t, "reload loop", func() bool { return h.fc.Waiters() == 0 })
 	h.log.clear()
 
@@ -625,7 +639,7 @@ func TestTableChangeWhileDisconnectedRestartsNothing(t *testing.T) {
 func TestTunnelOnlyChangeRestartsOnlySingBox(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute) // past the minimum gap between sing-box restarts
 	h.log.clear()
 
@@ -644,7 +658,7 @@ func TestTunnelOnlyChangeRestartsOnlySingBox(t *testing.T) {
 func TestDesyncChangeRestartsEngineBeforeSingBox(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.log.clear()
 
@@ -663,7 +677,7 @@ func TestDesyncChangeRestartsEngineBeforeSingBox(t *testing.T) {
 func TestEngineStopsAndStartsWithDesyncList(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.log.clear()
 
@@ -685,7 +699,7 @@ func TestEngineStopsAndStartsWithDesyncList(t *testing.T) {
 func TestFailedCheckKeepsOldConfigAndProcess(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	before := h.singBoxFile()
 	h.log.clear()
@@ -709,7 +723,7 @@ func TestFailedCheckKeepsOldConfigAndProcess(t *testing.T) {
 func TestDebounceMergesBurst(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.log.clear()
 
@@ -739,7 +753,7 @@ func TestDebounceMergesBurst(t *testing.T) {
 func TestSingBoxRestartRespectsMinimumGap(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(10 * time.Second) // only 10 s after sing-box started
 	h.log.clear()
 
@@ -760,7 +774,7 @@ func TestSingBoxRestartRespectsMinimumGap(t *testing.T) {
 func TestUplinkChangeRestartsEngineWithNewInterface(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.log.clear()
 
 	h.mu.Lock()
@@ -784,7 +798,7 @@ func TestUplinkChangeRestartsEngineWithNewInterface(t *testing.T) {
 func TestReverseShutdownOrder(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	stop := h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.log.clear()
 	if err := stop(); err != nil {
 		t.Fatal(err)
@@ -866,7 +880,7 @@ func TestParentExitShutsDown(t *testing.T) {
 	h.parent = func() bool { mu.Lock(); defer mu.Unlock(); return alive }
 	done := make(chan error, 1)
 	go func() { done <- h.app.Run(context.Background()) }()
-	h.waitOp("status.start")
+	h.waitRunning()
 	waitUntil(t, "parent ticker", func() bool { return h.fc.Waiters() >= 1 })
 	h.fc.Advance(parentPoll) // parent still alive
 	select {
@@ -915,7 +929,7 @@ func TestNoExcludeAddressIsConfigError(t *testing.T) {
 func TestStatusSourceSnapshot(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.mon.stat = monitor.Stats{Bytes: map[route.Route]int64{route.Tunnel: 100, route.Direct: 250, route.Desync: 150}}
 	h.fc.Advance(time.Minute)
 	h.publishAndFire(tbl(t, ent("yt.example", route.Desync), ent("blocked.example", route.Direct), ent("plain.example", route.Direct)))

@@ -82,7 +82,7 @@ func TestSnapshotHasState(t *testing.T) {
 func TestStateEventsFollowTransitions(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	ch, unsub := h.app.Subscribe()
 	defer unsub()
 	if err := h.app.Connect(context.Background()); err != nil {
@@ -110,7 +110,7 @@ func TestStateEventsFollowTransitions(t *testing.T) {
 func TestRoutesSinceHistoryAndEvents(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	start := h.fc.Now()
 	ch, unsub := h.app.Subscribe()
 	defer unsub()
@@ -178,7 +178,7 @@ func TestHistoryIsBounded(t *testing.T) {
 func TestCheckNow(t *testing.T) {
 	h := newHarness(t, tbl(t, ent("yt.example", route.Desync), ent("plain.example", route.Direct)), WithUI(true))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	ch, unsub := h.app.Subscribe()
 	defer unsub()
 
@@ -229,7 +229,7 @@ func TestCheckNow(t *testing.T) {
 func TestCheckEventsForScheduledCheckAndGrace(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	ch, unsub := h.app.Subscribe()
 	defer unsub()
 
@@ -272,7 +272,7 @@ func TestTrafficTickWhileConnected(t *testing.T) {
 		return clashapi.NewFake(clashapi.Snapshot{UploadTotal: 7, DownloadTotal: 9, Connections: []clashapi.Connection{{ID: "1"}, {ID: "2"}}})
 	}
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	ch, unsub := h.app.Subscribe()
 	defer unsub()
 
@@ -335,7 +335,7 @@ func TestLastErrorClassification(t *testing.T) {
 	connect := func(t *testing.T, h *harness) error {
 		t.Helper()
 		h.start()
-		h.waitOp("status.start")
+		h.waitRunning()
 		return h.app.Connect(context.Background())
 	}
 
@@ -429,7 +429,7 @@ func TestLastErrorClassification(t *testing.T) {
 	t.Run("cancelled connect is no error", func(t *testing.T) {
 		h := newHarness(t, baseTable(t), WithUI(true))
 		h.start()
-		h.waitOp("status.start")
+		h.waitRunning()
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		_ = h.app.Connect(ctx)

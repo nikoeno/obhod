@@ -49,7 +49,7 @@ func (h *harness) addServer(i int) servers.Server {
 func TestUIStartsWithoutTunnelFile(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true), noTunnelOutbounds)
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	if got := h.app.State(); got != StateDisconnected {
 		t.Fatalf("state = %s", got)
 	}
@@ -100,7 +100,7 @@ func TestUIModeRejectsBrokenTunnelFile(t *testing.T) {
 func TestAddActivateThenConnectUsesServer(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true), noTunnelOutbounds)
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	ctx := context.Background()
 
 	a := h.addServer(1)
@@ -145,7 +145,7 @@ func TestAddActivateThenConnectUsesServer(t *testing.T) {
 func TestActivateErrors(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true), noTunnelOutbounds)
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	ctx := context.Background()
 	s := h.addServer(1)
 	for _, id := range []string{"ffffffffffffffff", "../x", ""} {
@@ -182,7 +182,7 @@ func TestActivateErrors(t *testing.T) {
 func TestDeleteRules(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true), noTunnelOutbounds)
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	ctx := context.Background()
 	a, b := h.addServer(1), h.addServer(2)
 	if _, err := h.app.ActivateServer(ctx, a.ID); err != nil {
@@ -221,7 +221,7 @@ func TestDeleteRules(t *testing.T) {
 func TestServerCallsSerializeWithOps(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true), noTunnelOutbounds)
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	s := h.addServer(1)
 
 	if err := h.app.op.Lock(context.Background()); err != nil {
@@ -263,7 +263,7 @@ func connectedTwoServers(t *testing.T, opts ...Option) (h *harness, a, b servers
 	t.Helper()
 	h = newHarness(t, tbl(t, ent("a.example", route.Tunnel)), append([]Option{WithUI(true), noTunnelOutbounds}, opts...)...)
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	a, b = h.addServer(1), h.addServer(2)
 	ctx := context.Background()
 	if _, err := h.app.ActivateServer(ctx, a.ID); err != nil {

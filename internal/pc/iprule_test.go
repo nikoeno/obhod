@@ -139,7 +139,7 @@ func TestReloadWithoutIPRuleKeepsEngineDown(t *testing.T) {
 	h.nftList = nftListingEth0
 	h.start()
 	h.waitOp("start nfqws2")
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.log.clear()
 	h.mu.Lock()

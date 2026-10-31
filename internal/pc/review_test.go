@@ -60,7 +60,7 @@ func TestSingBoxRestartFailureRollsBackConfig(t *testing.T) {
 	buf := &syncBuffer{}
 	h := newHarness(t, baseTable(t), withLog(buf))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	before := h.singBoxFile()
 	h.log.clear()
@@ -93,7 +93,7 @@ func TestSingBoxLostEndsTerminalRun(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	done := make(chan error, 1)
 	go func() { done <- h.app.Run(context.Background()) }()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.procs.mu.Lock()
 	h.procs.restartErr[nameSingBox] = []error{errors.New("bad config"), errors.New("old one fails too")}
@@ -116,7 +116,7 @@ func TestSingBoxLostEndsTerminalRun(t *testing.T) {
 func TestSingBoxGiveUpDisconnectsInUIMode(t *testing.T) {
 	h := newHarness(t, baseTable(t), WithUI(true))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	if err := h.app.Connect(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestSingBoxGiveUpDisconnectsInUIMode(t *testing.T) {
 func TestEngineGiveUpIsRetriedOnNextReload(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.procs.crash("winws2")
 	waitUntil(t, "engine forgotten", func() bool {
@@ -162,7 +162,7 @@ func TestTUNAsUplinkNeverDrivesTheEngine(t *testing.T) {
 	// On reload: the engine keeps its interface, sing-box is still updated.
 	h = newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.log.clear()
 	h.mu.Lock()
@@ -186,7 +186,7 @@ func TestNFQWSUplinkChangeNeedsNewRules(t *testing.T) {
 	h.nftList = "table inet splitter {\n ip daddr 203.0.113.7 return\n oifname \"eth0\" tcp dport { 80, 443 } queue\n}"
 	h.start()
 	h.waitOp("start nfqws2")
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.log.clear()
 
@@ -271,7 +271,7 @@ func TestUIConnectEndsWithRun(t *testing.T) {
 		return h.uplink, nil
 	}
 	stop := h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	connected := make(chan error, 1)
 	go func() { connected <- h.app.Connect(context.Background()) }() // the UI's context never ends
 	waitUntil(t, "connecting", func() bool { return h.app.State() == StateConnecting })
@@ -291,7 +291,7 @@ func TestLogNeverHoldsSecrets(t *testing.T) {
 	h := newHarness(t, baseTable(t), withLog(buf))
 	h.app.outbounds.Tunnel = json.RawMessage(`{"type":"vless","server":"203.0.113.7","server_port":443,"uuid":"11111111-2222-3333-4444-555555555555"}`)
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.publishAndFire(tbl(t, ent("yt.example", route.Desync), ent("blocked.example", route.Direct)))
 	h.waitOp("restart sing-box")
