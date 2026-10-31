@@ -25,6 +25,6 @@ The desktop UI (ADR 0003) talks to the engine over a local HTTP API. That API mu
 - Milestones:
   1. This ADR, rule (f) and `Uses modules` in `arch_test.go`. No gateway yet.
   2. Move the app role out of `internal/pc`: `api/desktop` becomes the `splitter` app and wires `pc`. Done (2026-10-30): `api/desktop` owns `Main` and the command line; `internal/pc` is `Kind: child`, used by `api/desktop`, and exports what the CLI needs.
-  3. Control API (`internal/pc/PLAN.md` M12).
-  4. Server-management endpoints.
+  3. Control API (`internal/pc/PLAN.md` M12). Done (2026-10-31, commit f793081): contract and decisions in `api/desktop/API.md`.
+  4. Server-management endpoints. Contract approved 2026-10-31 (`api/desktop/API.md`, "Server management decisions"); implementation next.
 - ADR 0003 point 4 and its Open list now place the control API in `api/desktop` (updated with milestone 2).

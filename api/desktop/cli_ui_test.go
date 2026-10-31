@@ -205,6 +205,9 @@ func TestUIReadyLineAddrFileAndServing(t *testing.T) {
 	if got := out.String(); !readyLine.MatchString(got) {
 		t.Fatalf("stdout has more than the ready line: %q", got)
 	}
+	if _, err := os.Stat(addrFile); !os.IsNotExist(err) {
+		t.Fatalf("addr file still there after a clean shutdown: %v", err)
+	}
 	if _, err := http.Get("http://" + addr + "/api/v1/version"); err == nil {
 		t.Fatal("the listener is still open")
 	}
@@ -265,6 +268,52 @@ func TestUIAddrFileFailureIsReportedWithoutALine(t *testing.T) {
 	if h.out.Len() != 0 {
 		t.Fatalf("stdout = %q", h.out.String())
 	}
+}
+
+func TestUIAddrFileRemovedOnSignalStop(t *testing.T) {
+	h := newUIHarness(t)
+	out := &syncWriter{}
+	h.cli.stdout = out
+	addrFile := filepath.Join(t.TempDir(), "api.addr")
+	h.eng.makeReady()
+	codeCh := make(chan int, 1)
+	go func() { codeCh <- h.run("run", "--ui", "--token-file", h.tokenArg, "--addr-file", addrFile) }()
+	waitFor(t, "ready line", func() bool { return strings.Contains(out.String(), "OBHOD-API") })
+	if _, err := os.Stat(addrFile); err != nil {
+		t.Fatalf("addr file missing while running: %v", err)
+	}
+	h.cancel()
+	if code := <-codeCh; code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if _, err := os.Stat(addrFile); !os.IsNotExist(err) {
+		t.Fatalf("addr file still there after a signal stop: %v", err)
+	}
+}
+
+func TestUIStaleAddrFileIsRemovedAtStart(t *testing.T) {
+	h := newUIHarness(t)
+	out := &syncWriter{}
+	h.cli.stdout = out
+	addrFile := filepath.Join(t.TempDir(), "api.addr")
+	if err := os.WriteFile(addrFile, []byte("127.0.0.1:1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	codeCh := make(chan int, 1)
+	go func() { codeCh <- h.run("run", "--ui", "--token-file", h.tokenArg, "--addr-file", addrFile) }()
+	waitFor(t, "Run", func() bool { return h.eng.callCount("Run") == 1 })
+	// Not ready yet: the dead address must already be gone.
+	if _, err := os.Stat(addrFile); !os.IsNotExist(err) {
+		t.Fatalf("stale addr file survived the start: %v", err)
+	}
+	h.eng.makeReady()
+	waitFor(t, "ready line", func() bool { return strings.Contains(out.String(), "OBHOD-API") })
+	m := readyLine.FindStringSubmatch(out.String())
+	if b, err := os.ReadFile(addrFile); err != nil || m == nil || string(b) != m[1] {
+		t.Fatalf("addr file = %q, %v (line %q)", b, err, out.String())
+	}
+	h.cancel()
+	<-codeCh
 }
 
 func TestUIRunErrorAfterReadyMapsToExitCode(t *testing.T) {

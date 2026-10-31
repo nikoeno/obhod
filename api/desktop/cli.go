@@ -226,6 +226,12 @@ const logRingLines = 200
 // runUI binds the control API, runs the app, prints the ready line once the
 // app is ready, and serves until the app ends.
 func (c *cli) runUI(eng engine, logger *slog.Logger, token, listen, addrFile string) int {
+	// A file left by a crashed run holds a dead address: drop it before binding.
+	if addrFile != "" {
+		if err := os.Remove(addrFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return c.errorf(pc.ExitConfig, "run: --addr-file: cannot remove the old file: %v", err)
+		}
+	}
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return c.errorf(pc.ExitConfig, "run: cannot listen on %s: %v", listen, err)
@@ -261,6 +267,9 @@ func (c *cli) runUI(eng engine, logger *slog.Logger, token, listen, addrFile str
 			_ = ln.Close()
 			return c.errorf(pc.ExitConfig, "run: --addr-file: %v", err)
 		}
+		// Whatever way this function returns (a crash that kills the process
+		// excepted), the address is dead: do not leave it behind.
+		defer os.Remove(addrFile)
 	}
 	fmt.Fprintf(c.stdout, "OBHOD-API v1 %s\n", addr)
 	logger.Info("control API listening")
