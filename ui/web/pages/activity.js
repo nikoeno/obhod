@@ -1,7 +1,7 @@
 // Activity: what happened recently (docs/UI.md §5.3).
 import { h, svg, replace, tabs, fmtBytes, fmtAgo, fmtIn, fmtTime } from '../dom.js';
 import { S, routeTraffic } from '../store.js';
-import { ROUTES, routeWord, explainWarning } from '../words.js';
+import { ROUTES, routeWord, explainWarning, networkLabel } from '../words.js';
 import { go, keepFocus } from '../shell.js';
 
 const TABS = [
@@ -66,11 +66,11 @@ export function create(params) {
     const nets = S.networks.slice().reverse();
     return [
       h('dl', { class: 'facts wide' },
-        h('dt', { text: 'Network' }), h('dd', { text: s.Network || 'Still learning this network' }),
+        h('dt', { text: 'Network' }), h('dd', { text: networkLabel(s.Network) }),
         h('dt', { text: 'Last check' }), h('dd', { text: S.checking ? 'Checking…' : `${fmtAgo(s.LastCheck)} (${fmtTime(s.LastCheck)})` }),
         h('dt', { text: 'Next check' }), h('dd', { text: `${fmtIn(s.NextCheck)} (${fmtTime(s.NextCheck)})` })),
       h('h2', { class: 'h3', text: 'Networks seen this session' }),
-      nets.length ? h('ul', { class: 'history' }, nets.map((n) => h('li', null, n.label, h('span', { class: 'muted', text: ` · since ${fmtTime(n.since)}` }))))
+      nets.length ? h('ul', { class: 'history' }, nets.map((n) => h('li', null, networkLabel(n.label), h('span', { class: 'muted', text: ` · since ${fmtTime(n.since)}` }))))
         : h('p', { class: 'muted', text: 'None yet.' }),
       h('p', { class: 'muted small', text: 'Networks are shown by name only. The app never shows or stores your public address.' }),
     ];

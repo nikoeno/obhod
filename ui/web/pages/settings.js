@@ -1,7 +1,10 @@
 // Settings (docs/UI.md §5.4). In this MVP every setting lives in localStorage only.
 import * as api from '../api.js';
+import { UI_VERSION } from '../api.js';
 import { h, replace, tabs, toast, toggleRow, loadSetting, saveSetting } from '../dom.js';
-import { S, restartConnection, restartEngine, quit } from '../store.js';
+import { S, restartConnection, restartEngine, quit, activateServer } from '../store.js';
+import { SERVER_TEXT, MAX_SERVERS, protocolName, serverErrorText } from '../words.js';
+import { showAddServerDialog, confirmRemoveServer } from '../serverui.js';
 import { keepFocus } from '../shell.js';
 
 const TABS = [
@@ -13,8 +16,10 @@ const TABS = [
 const NOT_IN_MOCK = 'Not available in the mock';
 
 let restartNeeded = false;
+const revealed = new Set(); // server ids whose address is shown (addresses stay hidden by default)
 
 export function create(params) {
+  let pendingId = null;
   let tab = TABS.some((t) => t.id === params.tab) ? params.tab : 'general';
   const tabSlot = h('div');
   const panel = h('div', { role: 'tabpanel', class: 'tabpanel', tabIndex: -1 });
@@ -47,21 +52,80 @@ export function create(params) {
   }
 
   function detour() {
-    const ready = loadSetting('detourReady', true);
-    return [
+    const list = S.servers;
+    const active = list.find((x) => x.active);
+    const locked = S.engineDown || S.state === 'connecting' || S.state === 'disconnecting';
+    const full = list.length >= MAX_SERVERS;
+    const out = [
       h('div', { class: 'row setting' },
         h('div', { class: 'grow' }, h('strong', { text: 'Detour server' }),
-          h('p', { class: 'muted small', text: 'Needed to open Blocked sites. The file is kept private and never shown again.' })),
-        h('span', { class: ['pill', ready ? 'ok' : 'warn'], text: ready ? 'Ready' : 'Missing' })),
-      h('div', { class: 'row gap' },
-        h('button', { class: 'btn', type: 'button', text: 'Import server file…', onclick: () => toast(NOT_IN_MOCK) }),
-        h('button', { class: 'btn', type: 'button', text: 'Remove', disabled: !ready, onclick: () => { saveSetting('detourReady', false); toast('Removed (mock: nothing was deleted).'); render(); } })),
-      h('div', { class: 'row setting' },
-        h('div', { class: 'grow' }, h('strong', { text: 'Extra proxy (optional)' }),
-          h('p', { class: 'muted small', text: 'Sites on the "Via proxy" path go through it.' }))),
-      h('div', { class: 'row gap' }, h('button', { class: 'btn', type: 'button', text: 'Import proxy file…', onclick: () => toast(NOT_IN_MOCK) })),
+          h('p', { class: 'muted small', text: SERVER_TEXT.lead })),
+        S.serversLoaded ? h('span', { class: ['pill', active ? 'ok' : 'warn'], text: active ? SERVER_TEXT.ready : SERVER_TEXT.missing }) : null),
     ];
+    if (!S.serversLoaded) {
+      out.push(h('p', { class: 'empty', text: S.engineDown ? 'The engine is not running.' : 'Loading…' }));
+    } else if (!list.length) {
+      out.push(h('p', { class: 'empty', text: SERVER_TEXT.none }));
+    } else {
+      out.push(h('ul', { class: 'servers', 'aria-label': 'Detour servers' }, list.map((x) => serverRow(x, locked))));
+    }
+    out.push(h('div', { class: 'row gap wrap' },
+      h('button', { class: 'btn primary', id: 'srv-add', type: 'button', text: SERVER_TEXT.add, disabled: locked || full || !S.serversLoaded, 'aria-describedby': 'srv-note',
+        onclick: () => showAddServerDialog((s2) => focusNew(s2)) }),
+      h('span', { class: 'muted small', text: SERVER_TEXT.count(list.length) })));
+    const note = full ? SERVER_TEXT.listFull
+      : locked && !S.engineDown ? SERVER_TEXT.busyHint
+        : S.state === 'connected' && list.length > 1 ? SERVER_TEXT.switchHint : '';
+    out.push(h('p', { id: 'srv-note', class: 'muted small', 'aria-live': 'polite', text: note }));
+    out.push(h('div', { class: 'row setting' },
+      h('div', { class: 'grow' }, h('strong', { text: SERVER_TEXT.proxyTitle }),
+        h('p', { class: 'muted small', text: SERVER_TEXT.proxyHint })),
+      h('span', { class: 'later', text: 'later' })));
+    return out;
   }
+
+  function serverRow(x, locked) {
+    const shown = revealed.has(x.id);
+    const hostText = x.host.includes(':') && !x.host.startsWith('[') ? `[${x.host}]` : x.host;
+    const pending = pendingId === x.id;
+    return h('li', { class: 'server' },
+      h('div', { class: 'server-main' },
+        h('div', { class: 'server-name' }, h('span', { text: x.name }), x.active ? h('span', { class: 'pill ok', text: SERVER_TEXT.inUse }) : null),
+        h('div', { class: 'muted small' },
+          protocolName(x.protocol), ' · ',
+          shown ? h('span', { class: 'tech', text: `${hostText}:${x.port}` }) : SERVER_TEXT.hidden)),
+      h('div', { class: 'server-actions' },
+        h('button', {
+          class: 'link', type: 'button', text: shown ? SERVER_TEXT.hideAddress : SERVER_TEXT.showAddress,
+          'aria-expanded': String(shown), 'aria-label': `${shown ? SERVER_TEXT.hideAddress : SERVER_TEXT.showAddress} of ${x.name}`,
+          onclick: () => { if (shown) revealed.delete(x.id); else revealed.add(x.id); render(); },
+        }),
+        x.active ? null : h('button', {
+          class: 'btn small', id: 'srv-use-' + x.id, type: 'button', text: pending ? 'Switching…' : SERVER_TEXT.makeActive,
+          'aria-label': `${SERVER_TEXT.makeActive}: ${x.name}`, disabled: locked || pending, onclick: () => makeActive(x),
+        }),
+        h('button', {
+          class: 'btn small danger', id: 'srv-rm-' + x.id, type: 'button', text: SERVER_TEXT.remove,
+          'aria-label': `${SERVER_TEXT.remove}: ${x.name}`, disabled: locked,
+          onclick: () => confirmRemoveServer(x, () => document.getElementById('srv-add')?.focus()),
+        })));
+  }
+
+  async function makeActive(x) {
+    pendingId = x.id;
+    render();
+    try {
+      const r = await activateServer(x.id);
+      toast(r.reloaded ? SERVER_TEXT.switching(x.name) : SERVER_TEXT.nowActive(x.name));
+    } catch (e) {
+      toast(serverErrorText(e, 'activate'));
+    } finally {
+      pendingId = null;
+      render();
+    }
+  }
+
+  function focusNew(s2) { document.getElementById('srv-use-' + s2.id)?.focus(); }
 
   function advanced() {
     const changed = (key) => (v) => { saveSetting(key, v); restartNeeded = true; render(); };
@@ -99,10 +163,10 @@ export function create(params) {
   function about() {
     const ver = h('dl', { class: 'facts wide' }, h('dt', { text: 'Loading…' }));
     api.getVersion().then((v) => replace(ver,
-      h('dt', { text: 'App (UI)' }), h('dd', { text: v.ui }),
+      h('dt', { text: 'App (UI)' }), h('dd', { text: UI_VERSION }),
       h('dt', { text: 'Engine (splitter)' }), h('dd', { text: v.splitter }),
-      h('dt', { text: 'sing-box' }), h('dd', { text: v.singBox }),
-      h('dt', { text: 'Desync engine' }), h('dd', { text: v.desync }),
+      h('dt', { text: 'sing-box' }), h('dd', { text: v.singBox || 'not reported' }),
+      h('dt', { text: 'Desync engine' }), h('dd', { text: v.desync || 'not reported' }),
     )).catch((e) => replace(ver, h('dt', { text: 'Version' }), h('dd', { text: e.message })));
     return [
       ver,
@@ -119,5 +183,9 @@ export function create(params) {
 
   renderTabs();
   render();
-  return { el, update() { /* settings do not depend on live data */ } };
+  return {
+    el,
+    // The server list and the connection state change what the Detour server tab offers.
+    update(topic) { if (tab === 'detour' && (topic === 'servers' || topic === 'state')) render(); },
+  };
 }

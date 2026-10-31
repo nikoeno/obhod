@@ -1,6 +1,6 @@
 # Desktop UI: pages, tabs and user actions
 
-Status: draft (2026-10-25). Describes the Tauri desktop app from ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`). Nothing here is built yet; the only UI that exists today is the read-only status page (`internal/pc/status`). Every action below maps to a control API call planned in M12 (`internal/pc/PLAN.md`), served by the gateway `api/desktop` (ADR 0004); actions marked **later** need a separate decision first.
+Status: draft (2026-10-25), updated 2026-10-31. Describes the Tauri desktop app from ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`). The Tauri app is not built yet. A clickable prototype of these pages exists in `ui/` (`ui/README.md`) and talks to a mock of the implemented control API (`api/desktop/API.md`: M12 and server management, milestone 4); the server-management flow (Settings → Detour server and the first-run card on Home) is **prototyped there** (2026-10-31). Every action below maps to a control API call served by the gateway `api/desktop` (ADR 0004); actions marked **later** need a separate decision first.
 
 Visual style: one large round accent button, neutral cards, one purple accent (`#534ab7` light / `#7f77dd` dark), system font.
 
@@ -91,7 +91,7 @@ Tabs:
 | All | every domain in the current table |
 | Everyday / Blocked / Picky | one route each (Proxy, Blocked by you appear only when non-empty) |
 
-List columns: site, path (user word + colour dot), since (when it moved there), traffic today.
+List columns: site, path (user word + colour dot), since (when it moved there), decided (how: checked on this network, from a fixed list, or a safe default until checked; `Route.source`). The API has no per-site traffic (monitor rule, decision 6), so there is no traffic column; traffic is shown per path on Home and Activity.
 
 User actions:
 
@@ -99,7 +99,7 @@ User actions:
 |---|---|---|
 | Search box | filters the list by substring, locally | – |
 | Switch tab | filters by route | – |
-| Click a site | side panel: current path, history of route changes for it, last check time | `routes`, events |
+| Click a site | side panel: current path, how it was decided, history of route changes for it, time of the last check (global, not per site) | `routes`, events |
 | **Check this site again** (side panel) | re-probes that one domain | `POST check-now {domains:[…]}` |
 | **Check all again** (toolbar) | re-probes everything | `POST check-now` |
 | **Always use …** (side panel) | **later**: per-domain override (PLAN.md §3) | – |
@@ -127,7 +127,7 @@ Few settings by design. Tabs:
 | Tab | Settings / actions | Notes |
 |---|---|---|
 | General | Start the app when I sign in (on/off); Connect automatically when the app starts (on/off); Close button hides to tray (on/off); Language | UI-side settings, stored by the Tauri app |
-| Detour server | A list of servers (name, protocol; host and port hidden behind a reveal) with an **active** marker and **Use** and **Remove** per server; **Add server** (paste a link or a sing-box JSON object, optional name; **Test** checks it offline first); "Ready" / "Missing" when none is active. The optional extra proxy (`proxy` outbound) is not managed in v1 | `GET/POST /servers`, `POST /servers/{id}/activate`, `DELETE /servers/{id}`, `POST /servers/test`. The engine writes the secrets; the pasted text is never shown again and never logged. **Use** while connected restarts the tunnel once (about a second; it may wait up to 30 s after the last restart) and **Remove** of the active server needs a disconnect first |
+| Detour server (**prototyped 2026-10-31**) | A list of servers (name, protocol; host and port hidden behind **Show address**) with an **Active** marker and **Make active** and **Remove** (with a confirmation) per server; **Add server** opens a dialog (paste a link or a sing-box JSON object, optional name, **Test** checks it offline first, **Add**; errors appear inline in plain words and the pasted text is gone once the dialog closes); a "Ready" / "Missing" pill (Missing when none is active); "N of 20 servers". The optional extra proxy (`proxy` outbound) is not managed in v1 (a "later" row) | `GET/POST /servers`, `POST /servers/{id}/activate`, `DELETE /servers/{id}`, `POST /servers/test`. The engine writes the secrets; the pasted text is never shown again and never logged. **Test** answers only a code (`invalid_input`, `unsupported_protocol`), so its sentence is the UI's; **Add** shows the engine's own fixed sentence. A new server is never active by itself: after **Add** the focus lands on its **Make active**. **Make active** while connected restarts the tunnel once (about a second; it may wait up to 30 s after the last restart) and **Remove** of the active server needs a disconnect first (the confirmation says so; the engine answers `busy`). While the app is starting or stopping the server buttons are disabled (the engine answers `busy`) |
 | Advanced | Block QUIC (on/off); Allow other DNS query types (`dns.allow_other_query_types`); log level | Each change needs a restart of the engine; the UI says so and offers **Restart now**. Writing `app.yaml` from the UI is open (section 12) |
 | About | version of the UI and of `splitter`, licenses of the bundled programs, **Check for updates** (opens the release page in the browser; no automatic network calls) | `GET version` |
 
@@ -146,7 +146,7 @@ Bottom of every tab: **Quit Obhod** (stops the engine and exits).
 ## 6. First run
 
 1. **Welcome**: one screen with the reference design (Start + three paths) and **Next**.
-2. **Detour server**: "To open blocked sites the app needs the server link from your provider." A paste field and **Add** (then **Use** is offered; a new server is never activated by itself), or **Skip for now** (then Blocked sites stay unavailable and Home shows a warning). The engine starts without a server file; **Start** answers "The detour server is not set up or cannot be reached." until one is in use.
+2. **Detour server** (**prototyped 2026-10-31 as a card on Home**, not as a separate wizard step): "Add a detour server to start. To open blocked sites the app needs the server link from your provider." **Add server** opens the paste dialog; after it the card changes to "Pick the server to use" with **Make active** (a new server is never activated by itself), or **Skip for now** (then the card is replaced by a warning banner "Blocked sites stay unavailable until you add a detour server." with **Add server**; the choice is remembered on this device). The engine starts without a server file; **Start** answers "The detour server is not set up or cannot be reached." (`tunnel_missing`) until one is in use, and Home then offers **Open Detour server settings**. See open question 3: today **Skip for now** cannot give an Everyday + Picky only mode.
 3. **Permission note**: "When you press Start, Windows will ask for permission. This is needed to route your traffic." (Linux: "your system will ask for your password.")
 4. **Done**: lands on Home, disconnected. Optional checkbox "Start now".
 
@@ -161,7 +161,7 @@ Bottom of every tab: **Quit Obhod** (stops the engine and exits).
 | Show window | tray click | – |
 | View logs | Help | `GET logs?name=` |
 | Export diagnostics | Help | local file only |
-| Add / use / remove / test a server | First run, Settings → Detour server | `POST /servers`, `POST /servers/{id}/activate`, `DELETE /servers/{id}`, `POST /servers/test` |
+| Add / make active / remove / test a server | First run, Settings → Detour server | `POST /servers`, `POST /servers/{id}/activate`, `DELETE /servers/{id}`, `POST /servers/test` |
 | Restart engine | "no engine" state, Settings → Advanced | UI restarts the `splitter` sidecar |
 | Quit | tray, Settings | `POST shutdown`, then the UI exits |
 
@@ -207,7 +207,8 @@ Notifications (OS toasts, can be turned off in General): connected, disconnected
 | `limit_reached` | "The list is full (20 servers). Remove one first." | Settings → Detour server |
 | `busy` (server call) | "The engine is busy connecting or disconnecting. Try again in a moment." | retry |
 | `too_large` (server call) | "The link or JSON is too large." | check what was pasted |
-| Activation could not be applied while connected (`state.error`, `connect_failed`) | "The new server could not be used. The previous server is still in place." | pick another server |
+| Activation could not be applied while connected (`state.error`, `connect_failed` while `state` is `connected`) | "The new server could not be used. The previous server is still in place." (banner on Home and a toast) | pick another server |
+| Any other connect failure (`connect_failed` while disconnected) | "Could not connect. See the engine log for details." | Try again; **Show engine log** |
 | sing-box gave up (disconnected after a failure) | "The connection stopped unexpectedly." | Try again; **Show engine log** |
 | API unreachable | "The engine is not running." | Restart engine |
 
@@ -220,9 +221,9 @@ Notifications (OS toasts, can be turned off in General): connected, disconnected
 | process list (Help, Details) | `GET /api/v1/processes` |
 | logs | `GET /api/v1/logs?name=` |
 | About | `GET /api/v1/version` |
-| live updates (state, table diffs, process events, traffic tick) | `GET /api/v1/events` (SSE) |
+| live updates (state, table diffs, check, traffic tick, final `shutdown`) | `GET /api/v1/events` (SSE) |
 | buttons | `POST connect`, `disconnect`, `check-now`, `shutdown` |
-| servers list, add, use, remove, offline test | `GET/POST /api/v1/servers`, `POST /api/v1/servers/{id}/activate`, `DELETE /api/v1/servers/{id}`, `POST /api/v1/servers/test` (milestone 4; no event kind, refetch the list after each call) |
+| servers list, add, make active, remove, offline test | `GET/POST /api/v1/servers`, `POST /api/v1/servers/{id}/activate`, `DELETE /api/v1/servers/{id}`, `POST /api/v1/servers/test` (milestone 4; no event kind, refetch the list after each call) |
 
 The web frontend calls Tauri commands only; the Rust side is the only API client and holds the token (ADR 0003, decision 4).
 
@@ -230,8 +231,9 @@ The web frontend calls Tauri commands only; the Rust side is the only API client
 
 1. ~~**Importing the server file.**~~ **Answered (2026-10-31, ADR 0004 milestone 4):** the engine owns secret writing. The UI sends the pasted link or JSON with `POST /servers`; `splitter` stores it under `Paths.Secrets/servers`, copies the active server to the `tunnel` file and never returns a secret. The installer step and a UI-written secrets file are dropped. The `proxy` outbound is not covered in v1.
 2. **Editing Advanced settings.** Does the UI write `app.yaml`, or does the API get a config endpoint? Today no endpoint changes config.
-3. **"Configure nothing" vs "import a server file".** The reference design promises no setup; a tunnel file is still required. Is "Skip for now" (Everyday + Picky only) an acceptable default?
+3. **"Configure nothing" vs "add a server link".** The reference design promises no setup; a detour server is still required. The "import a server file" half is **answered (2026-10-31, ADR 0004 milestone 4):** the user pastes a link and the engine stores it (question 1). **Still open:** is "Skip for now" (Everyday + Picky only) an acceptable default? The prototype only hides the first-run card and shows a banner, because the engine cannot run without a server today: `connect` answers `tunnel_missing`. A real Everyday + Picky only mode (sing-box without the tunnel outbound) needs an engine decision; until then Skip only postpones the setup.
 4. **Per-domain overrides and adding sites** (PLAN.md §3): which page they live on once decided (proposed: Sites side panel).
 5. **DNS reject notices** (G19): if built, show them under Activity → Warnings.
 6. **Service mode** (ADR 0003 decision 3, later): removes the UAC prompt per Start and lets the connection survive Quit; the Quit wording and first-run step 3 change then.
 7. Localisation: which languages ship in v1.
+8. **Server list details the prototype had to guess** (2026-10-31, all open): (a) servers cannot be renamed or edited (the API has no call; remove and add again); (b) **Test** is offline, so the dialog says "Looks fine" but cannot say the server is reachable (no latency, decision 20); (c) the full first-run wizard (Welcome, Detour server, Permission note, Done) is not prototyped, only the Detour card on Home; (d) with several servers, Home shows no name of the active one (could go in the Network line or the subtitle); (e) the address reveal is per session and not remembered; (f) the "Active" wording on the list versus "In use" in the docs; (g) whether a failed switch (`connect_failed` while On) should clear itself, today the banner stays until the next Start because the engine clears the error only then.

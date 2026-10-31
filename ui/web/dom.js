@@ -49,9 +49,12 @@ export function fmtBytes(n) {
   return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
 }
 
+// The engine sends the zero time (year 1) for "unknown".
+const KNOWN_AFTER = Date.UTC(2000, 0, 1);
+
 export function fmtAgo(iso) {
   const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return 'never';
+  if (!Number.isFinite(t) || t < KNOWN_AFTER) return 'never';
   const s = Math.round((Date.now() - t) / 1000);
   if (s < 0) return fmtIn(iso);
   if (s < 45) return 'just now';
@@ -64,7 +67,7 @@ export function fmtAgo(iso) {
 
 export function fmtIn(iso) {
   const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '–';
+  if (!Number.isFinite(t) || t < KNOWN_AFTER) return '–';
   const m = Math.round((t - Date.now()) / 60000);
   if (m <= 0) return 'now';
   if (m < 60) return `in ${m} min`;
@@ -73,7 +76,7 @@ export function fmtIn(iso) {
 
 export function fmtTime(iso) {
   const t = new Date(iso);
-  if (Number.isNaN(t.getTime())) return '–';
+  if (Number.isNaN(t.getTime()) || t.getTime() < KNOWN_AFTER) return '–';
   return t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
@@ -101,7 +104,7 @@ export function openDialog({ title, body, actions = [], label }) {
   const close = () => { dlg.close(); };
   dlg.addEventListener('close', () => dlg.remove());
   const btns = actions.map((a) => h('button', {
-    class: a.primary ? 'btn primary' : 'btn',
+    class: a.primary ? 'btn primary' : a.danger ? 'btn danger' : 'btn',
     text: a.label,
     onclick: async () => { const keep = a.onClick ? await a.onClick() : false; if (!keep) close(); },
   }));

@@ -41,10 +41,30 @@ export const errors: Record<string, { sentence: string; action: ErrorAction }> =
   already_running: { sentence: 'Obhod is already running.', action: 'none' },
   port_busy: { sentence: "Another program is using the app's port.", action: 'restart-engine' },
   tunnel_missing: { sentence: 'The detour server is not set up or cannot be reached.', action: 'detour' },
+  connect_failed: { sentence: 'Could not connect. See the engine log for details.', action: 'log' },
   crashed: { sentence: 'The connection stopped unexpectedly.', action: 'log' },
   engine_unreachable: { sentence: 'The engine is not running.', action: 'restart-engine' },
 };
 export const unknownError = 'Something went wrong.';
+
+/** connect_failed that arrives while the state is `connected` means a server switch that could not be applied. */
+export const switchFailed = 'The new server could not be used. The previous server is still in place.';
+
+/**
+ * Failed server calls (docs/UI.md §10). invalid_input and unsupported_protocol show the engine's own fixed sentence
+ * (never a value from the input); the others are the UI's.
+ */
+export const serverErrors = {
+  duplicate: 'This server is already in the list.',
+  limit_reached: 'The list is full (20 servers). Remove one first.',
+  too_large: 'The link or JSON is too large.',
+  not_found: 'This server is no longer in the list.',
+  busy: 'The engine is busy connecting or disconnecting. Try again in a moment.',
+  busyRemove: 'This server cannot be removed now. Stop the app first, or wait until it has finished starting or stopping.',
+  badName: 'The name must be 1 to 60 characters.',
+  invalidFallback: 'The link or JSON is not valid.',
+  unsupportedFallback: 'This kind of server is not supported.',
+} as const;
 
 export const actions = {
   restartEngine: 'Restart engine',
@@ -62,9 +82,11 @@ export const actions = {
   quit: 'Quit Obhod',
   restartNow: 'Restart now',
   clearView: 'Clear view',
-  importServer: 'Import server file…',
-  importProxy: 'Import proxy file…',
+  addServer: 'Add server',
+  makeActive: 'Make active',
   remove: 'Remove',
+  cancel: 'Cancel',
+  test: 'Test',
   exportDiagnostics: 'Export diagnostics…',
   openLogs: 'Open logs folder',
   checkUpdates: 'Check for updates',
@@ -88,13 +110,14 @@ export const pages = {
     lead: 'What the app decided for each site. It updates by itself.',
     search: 'Search sites',
     tabAll: 'All',
-    columns: { site: 'Site', path: 'Path', since: 'Since', today: 'Today' },
+    columns: { site: 'Site', path: 'Path', since: 'Since', decided: 'Decided' },
     empty: 'Still learning this network. Sites will appear in a few seconds.',
     count: { one: '{n} site', other: '{n} sites' },
     countMatching: ' matching “{query}”',
     noMatch: 'No sites match “{query}”.',
     noneOnPath: 'No sites on this path yet.',
-    panel: { path: 'Path', since: 'Since', lastCheck: 'Last check', history: 'History', alwaysUse: 'Always use…' },
+    panel: { path: 'Path', since: 'Since', decided: 'Decided', lastCheck: 'Last check (all sites)', history: 'History', alwaysUse: 'Always use…' },
+    sources: { checked: 'Checked on this network', static: 'From a fixed list', default: 'Safe default until checked' },
     alwaysUseLater: 'later: choosing a path per site is not available yet',
     addSite: 'Add a site',
   },
@@ -124,11 +147,42 @@ export const pages = {
       language: 'Language',
     },
     detour: {
-      lead: 'Needed to open Blocked sites. The file is kept private and never shown again.',
+      lead: 'Needed to open Blocked sites. The link is kept private and never shown again.',
       ready: 'Ready',
       missing: 'Missing',
+      active: 'Active',
+      none: 'No servers yet. Add the link your provider gave you.',
+      addressHidden: 'Address hidden',
+      showAddress: 'Show address',
+      hideAddress: 'Hide address',
+      count: '{n} of 20 servers',
+      switchHint: 'Switching while On restarts the connection once, about a second.',
+      busyHint: 'The app is starting or stopping. Server changes are available again in a moment.',
+      switching: 'Switching to {name}. The connection restarts once.',
+      nowActive: '{name} is now in use.',
+      added: '{name} added. Make it active to use it.',
+      removed: '{name} removed.',
+      add: {
+        title: 'Add a detour server',
+        inputLabel: 'Server link or JSON',
+        inputHelp: 'Paste the link from your provider (vless, vmess, trojan, ss, hy2, tuic) or one sing-box server object in JSON. It is checked on this computer and never shown again.',
+        nameLabel: 'Name (optional)',
+        nameHelp: 'Up to 60 characters. Without a name the app picks one.',
+        pasteFirst: 'Paste the link or JSON from your provider first.',
+        testing: 'Checking…',
+        adding: 'Adding…',
+        testOk: 'Looks fine: a {protocol} server. This check runs on this computer only; the connection itself is not tried.',
+        testInvalid: 'This does not look like a valid server. Check that you pasted the whole link.',
+        testUnsupported: 'This kind of server is not supported.',
+      },
+      remove: {
+        title: 'Remove {name}?',
+        body: 'It is deleted from this computer and cannot be shown again. To use it later, add the link again.',
+        activeTitle: 'Stop first',
+        activeBody: 'This server is in use. Stop the app first (Stop on Home), then remove it.',
+      },
       proxy: 'Extra proxy (optional)',
-      proxyHint: 'Sites on the "Via proxy" path go through it.',
+      proxyHint: 'Sites on the "Via proxy" path go through it. Not available yet.',
     },
     advanced: {
       blockQuic: { label: 'Block QUIC', hint: 'Sites fall back to regular HTTPS, which the app handles better.' },
@@ -160,10 +214,17 @@ export const tray = {
   quit: 'Quit',
 } as const;
 
-/** First run (docs/UI.md §6); not built in the MVP. */
+/** First run (docs/UI.md §6). Only the detour-server card on Home is built in the MVP. */
 export const firstRun = {
-  detour: 'To open blocked sites the app needs a server file from your provider.',
+  /** Home card while no server exists (built in the MVP; the Welcome and Permission screens are not). */
+  detourTitle: 'Add a detour server to start',
+  detour: 'To open blocked sites the app needs the server link from your provider.',
   skip: 'Skip for now',
+  /** Home banner after "Skip for now". */
+  skippedBanner: 'Blocked sites stay unavailable until you add a detour server.',
+  /** A server is saved but none is active (a new server is never activated by itself). */
+  pickTitle: 'Pick the server to use',
+  pickText: 'A server is saved, but none is in use yet.',
   permissionWindows: 'When you press Start, Windows will ask for permission. This is needed to route your traffic.',
   permissionLinux: 'When you press Start, your system will ask for your password. This is needed to route your traffic.',
   startNow: 'Start now',

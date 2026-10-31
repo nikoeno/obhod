@@ -1,7 +1,7 @@
 // Sites: what the app decided for each site (docs/UI.md §5.2). Read-only in v1.
-import { h, replace, tabs, fmtBytes, fmtAgo, fmtTime } from '../dom.js';
+import { h, replace, tabs, fmtAgo, fmtTime } from '../dom.js';
 import { S, checkNow, routeCount } from '../store.js';
-import { ROUTES, MAIN, EXTRA } from '../words.js';
+import { ROUTES, MAIN, EXTRA, sourceWord, isLearning } from '../words.js';
 import { keepFocus } from '../shell.js';
 
 export function create(params) {
@@ -49,7 +49,7 @@ export function create(params) {
   function renderList() {
     checkAll.disabled = S.checking || S.engineDown;
     checkAll.textContent = S.checking && !S.checkingDomains ? 'Checking…' : 'Check all again';
-    const learning = S.snapshot && !S.snapshot.Network;
+    const learning = S.snapshot && isLearning(S.snapshot.Network);
     if (S.engineDown) { status.textContent = ''; replace(listSlot, h('p', { class: 'empty', text: 'The engine is not running.' })); return; }
     if (learning || (S.loaded && S.routes.length === 0)) {
       status.textContent = '';
@@ -63,7 +63,7 @@ export function create(params) {
       h('caption', { class: 'sr-only', text: 'Sites and the path each one takes' }),
       h('thead', null, h('tr', null,
         h('th', { scope: 'col', text: 'Site' }), h('th', { scope: 'col', text: 'Path' }),
-        h('th', { scope: 'col', text: 'Since' }), h('th', { scope: 'col', class: 'num', text: 'Today' }))),
+        h('th', { scope: 'col', text: 'Since' }), h('th', { scope: 'col', text: 'Decided' }))),
       h('tbody', null, list.map((r) => h('tr', { class: r.domain === selected ? 'sel' : null },
         h('td', null, h('button', {
           class: 'link plain site', type: 'button', text: r.domain, 'aria-expanded': String(r.domain === selected),
@@ -71,7 +71,7 @@ export function create(params) {
         })),
         h('td', null, h('span', { class: 'dot ' + ROUTES[r.route].dot, 'aria-hidden': 'true' }), ROUTES[r.route].word),
         h('td', { class: 'muted', text: fmtAgo(r.since) }),
-        h('td', { class: 'num', text: r.route === 'block' ? '–' : fmtBytes(r.trafficToday) })))));
+        h('td', { class: 'muted', text: sourceWord(r.source) })))));
     keepFocus(listSlot, () => replace(listSlot, table));
   }
 
@@ -88,8 +88,8 @@ export function create(params) {
       h('dl', { class: 'facts' },
         h('dt', { text: 'Path' }), h('dd', null, h('span', { class: 'dot ' + meta.dot, 'aria-hidden': 'true' }), `${meta.long} `, h('code', { class: 'tech', text: r.route })),
         h('dt', { text: 'Since' }), h('dd', { text: `${fmtAgo(r.since)} (${fmtTime(r.since)})` }),
-        h('dt', { text: 'Today' }), h('dd', { text: r.route === 'block' ? 'never opened' : fmtBytes(r.trafficToday) }),
-        h('dt', { text: 'Last check' }), h('dd', { text: fmtAgo(r.lastCheck) })),
+        h('dt', { text: 'Decided' }), h('dd', { text: sourceWord(r.source) }),
+        h('dt', { text: 'Last check' }), h('dd', { text: `${fmtAgo(r.lastCheck)} (all sites)` })),
       h('h3', { text: 'History' }),
       history.length
         ? h('ul', { class: 'history' }, history.map((c) => h('li', null,

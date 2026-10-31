@@ -42,8 +42,9 @@ onChange((topic, extra) => {
     navStatus.textContent = stateWord();
     navStatus.className = 'nav-status ' + (S.engineDown ? 'down' : S.state);
     if (extra && extra.newError) {
-      const info = errorInfo(extra.newError);
+      const info = errorInfo(extra.newError, S.state);
       if (info.code === 'needs_setup') showSetupDialog(extra.newError);
+      else if (S.state === 'connected') toast(info.sentence); // a failed server switch; the banner on Home stays
     }
   }
   if (current && current.page.update) current.page.update(topic, extra);
@@ -91,6 +92,7 @@ const SCENARIOS = [
   ['needs-setup', 'Linux: one-time setup needed'],
   ['crash', 'Connection drops after a few seconds'],
   ['no-engine', 'Engine not running (all calls 503)'],
+  ['no-server', 'No detour server (Start fails, list is empty)'],
 ];
 
 async function toggleDevPanel() {
@@ -108,7 +110,8 @@ async function toggleDevPanel() {
       h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Close mock controls', text: '×', onclick: () => { devPanel.hidden = true; } })),
     h('fieldset', null, h('legend', { text: 'Scenario' }), radios),
     h('fieldset', null, h('legend', { text: 'Data' }),
-      flag('warnings', 'Warnings'), flag('extras', 'Proxy and blocked-by-you sites'), flag('learning', 'Still learning (no network yet)')),
+      flag('warnings', 'Warnings'), flag('extras', 'Proxy and blocked-by-you sites'), flag('learning', 'Still learning (no network yet)'),
+      flag('reloadFails', 'Switching server while On fails')),
     h('div', { class: 'row gap wrap' },
       h('button', { class: 'btn small', type: 'button', text: 'Change network', onclick: () => setMock({ network: 'next' }) }),
       h('button', { class: 'btn small', type: 'button', text: 'Reset data', onclick: () => setMock({ reset: true }) })),

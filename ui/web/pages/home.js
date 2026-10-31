@@ -1,7 +1,8 @@
 // Home: the one-button screen (docs/UI.md §4, §5.1).
-import { h, svg, replace, fmtBytes, fmtAgo, pct } from '../dom.js';
-import { S, toggleConnection, checkNow, restartEngine, routeCount, routeTraffic } from '../store.js';
-import { ROUTES, MAIN, EXTRA, errorInfo } from '../words.js';
+import { h, svg, replace, fmtBytes, fmtAgo, pct, loadSetting, saveSetting, toast } from '../dom.js';
+import { S, toggleConnection, checkNow, restartEngine, routeCount, routeTraffic, activateServer, activeServer } from '../store.js';
+import { ROUTES, MAIN, EXTRA, errorInfo, networkLabel, FIRST_RUN, SERVER_TEXT, serverErrorText } from '../words.js';
+import { showAddServerDialog } from '../serverui.js';
 import { go, showSetupDialog, showLogDialog, keepFocus } from '../shell.js';
 
 function powerIcon() {
@@ -12,7 +13,7 @@ function powerIcon() {
 
 /** Button look per state (§4). */
 function buttonModel() {
-  const err = errorInfo(S.error);
+  const err = errorInfo(S.error, S.state);
   if (S.engineDown) return { cls: 'off', label: '–', name: 'Start, unavailable: the engine is not running', disabled: true, sub: 'The engine is not running.' };
   switch (S.state) {
     case 'connecting': return { cls: 'busy', label: 'Starting…', name: 'Starting, please wait', disabled: true, sub: 'Asking for permission and starting.' };
@@ -52,8 +53,16 @@ function fan() {
     ...[100, 300, 500].map((x) => svg('path', { d: p(x), fill: 'none', 'vector-effect': 'non-scaling-stroke' })));
 }
 
+async function useServer(x) {
+  try {
+    const r = await activateServer(x.id);
+    toast(r.reloaded ? SERVER_TEXT.switching(x.name) : SERVER_TEXT.nowActive(x.name));
+  } catch (e) { toast(serverErrorText(e, 'activate')); }
+}
+
 export function create() {
   const banner = h('div', { class: 'banner-slot' });
+  const setup = h('div', { class: 'setup-slot' });
   const big = h('button', { class: 'big', type: 'button', onclick: toggleConnection }, powerIcon(), h('span', { class: 'big-label' }));
   const sub = h('p', { class: 'subtitle', 'aria-live': 'polite' });
   const subAction = h('div', { class: 'sub-action' });
@@ -66,7 +75,7 @@ export function create() {
 
   const el = h('section', { class: 'page home', 'aria-labelledby': 'home-h' },
     h('h1', { id: 'home-h', class: 'sr-only', text: 'Home' }),
-    banner,
+    banner, setup,
     h('div', { class: 'hero' }, big, sub, subAction),
     fanEl, cards, extras, savings, netLine);
 
@@ -107,6 +116,14 @@ export function create() {
     const warns = (S.snapshot && S.snapshot.Warnings) || [];
     keepFocus(banner, () => {
     replace(banner);
+    // A server switch that could not be applied while On: the old server is still in use.
+    const failed = S.state === 'connected' && !S.engineDown ? errorInfo(S.error, S.state) : null;
+    if (failed) {
+      banner.append(h('div', { class: 'banner', role: 'alert' },
+        h('span', { class: 'banner-icon', 'aria-hidden': 'true', text: '!' }),
+        h('span', { class: 'grow', text: failed.sentence }),
+        h('button', { class: 'link', type: 'button', text: 'Open Detour server settings', onclick: () => go('settings', { tab: 'detour' }) })));
+    }
     if (warns.length && !S.engineDown) {
       banner.append(h('div', { class: 'banner', role: 'status' },
         h('span', { class: 'banner-icon', 'aria-hidden': 'true', text: '!' }),
@@ -115,13 +132,40 @@ export function create() {
     }
     });
 
+    // First run and missing detour server (docs/UI.md §6): a card to add one, or a reminder after "Skip for now".
+    keepFocus(setup, () => {
+      replace(setup);
+      if (S.engineDown || !S.serversLoaded || activeServer()) return;
+      if (S.servers.length) {
+        const only = S.servers.length === 1 ? S.servers[0] : null;
+        setup.append(h('section', { class: 'setup-card', 'aria-labelledby': 'setup-h' },
+          h('h2', { id: 'setup-h', text: FIRST_RUN.pickTitle }),
+          h('p', { class: 'muted', text: FIRST_RUN.pickText }),
+          h('div', { class: 'row gap wrap' }, only
+            ? h('button', { class: 'btn primary', type: 'button', text: `${SERVER_TEXT.makeActive}: ${only.name}`, onclick: () => useServer(only) })
+            : h('button', { class: 'btn primary', type: 'button', text: 'Choose in Settings', onclick: () => go('settings', { tab: 'detour' }) }))));
+      } else if (!loadSetting('detourSkipped', false)) {
+        setup.append(h('section', { class: 'setup-card', 'aria-labelledby': 'setup-h' },
+          h('h2', { id: 'setup-h', text: FIRST_RUN.title }),
+          h('p', { class: 'muted', text: FIRST_RUN.text }),
+          h('div', { class: 'row gap wrap' },
+            h('button', { class: 'btn primary', type: 'button', text: SERVER_TEXT.add, onclick: () => showAddServerDialog() }),
+            h('button', { class: 'btn', type: 'button', text: FIRST_RUN.skip, onclick: () => { saveSetting('detourSkipped', true); update(); } }))));
+      } else {
+        setup.append(h('div', { class: 'banner', role: 'status' },
+          h('span', { class: 'banner-icon', 'aria-hidden': 'true', text: '!' }),
+          h('span', { class: 'grow', text: FIRST_RUN.skippedBanner }),
+          h('button', { class: 'link', type: 'button', text: FIRST_RUN.skippedAction, onclick: () => go('settings', { tab: 'detour' }) })));
+      }
+    });
+
     updateNumbers();
     const snap = S.snapshot;
 
     keepFocus(netLine, () => {
     replace(netLine);
     if (snap && !S.engineDown) {
-      const label = snap.Network || 'Still learning this network';
+      const label = networkLabel(snap.Network);
       const checked = S.checking ? 'Checking…' : `checked ${fmtAgo(snap.LastCheck)}`;
       netLine.append(
         h('button', { class: 'link plain', type: 'button', 'aria-label': `Network: ${label}, ${checked}. Show network details`, onclick: () => go('activity', { tab: 'network' }) },

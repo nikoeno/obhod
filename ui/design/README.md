@@ -104,6 +104,12 @@ Native `<dialog>`: `bg`, 1px `border`, radius 12px, padding 20px 22px, backdrop 
 ### Toast
 Bottom-right stack (16px from edges, 8px gap): inverted (`text` fill, `bg` text), radius 10px, padding 10px 14px, 0.92rem. Visible 2.8s, fades 300ms, removed at 3.2s. For confirmations only ("Copied", "Checking all sites again…"); errors go in the page, never only in a toast.
 
+### Form fields and messages
+Text input and textarea (`.field`): `bg` fill, 1px `border`, radius 10px, padding 8px 10px, full width; the paste field is monospace (`.mono`, 0.86rem, 5 rows, resizable). Invalid: `aria-invalid="true"` and a `r-block` border. Each field has a visible `<label>` (600) and a muted 0.85rem help line wired with `aria-describedby`. The inline message under a form (`.form-msg`, `role="status"`, `aria-live="polite"`) is empty-hidden; `err` uses `warn-bg`/`warn-text`, `ok` uses `ok-bg`/`ok-text`; radius 10px, padding 8px 12px. Errors stay in the dialog, never only in a toast.
+
+### Server list and first-run card
+Server row (`.server`): 12px vertical padding, bottom `border`, name 600 with an `ok` pill "Active", then a muted line "Protocol · Address hidden" (the address, when revealed, is a tech tag). Actions: link button "Show address" (`aria-expanded`), small "Make active", small danger "Remove"; each has an `aria-label` that names the server. Row wraps on narrow widths. The first-run card (`.setup-card`): `card` fill, radius 12px, padding 16px 18px, h2 + one muted line + a primary and a default button; it sits above the big button and is replaced by the warning banner after "Skip for now".
+
 ### Tech tag
 Engine names in Details: 0.78rem muted, 1px `border`, radius 4px, padding 0 4px.
 
@@ -136,7 +142,7 @@ Durations in `tokens.*` (`press` 120ms, `toggle` 150ms, `state` 200ms, `fade` 30
 | Counts | "1 site" / "N sites" (use plural rules once localised) | |
 | Placeholder | en dash "–" for missing values | |
 
-Ellipsis is the single character "…" in labels ("Starting…", "Import server file…").
+Ellipsis is the single character "…" in labels ("Starting…", "Export diagnostics…").
 
 ## 10. Porting notes (Vue + Tauri)
 

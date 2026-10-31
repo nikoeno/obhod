@@ -16,6 +16,8 @@ export const S = {
   snapshot: null,
   networks: [],
   routes: [],
+  servers: [], // [{id, name, protocol, engine, host, port, active, addedAt}] - never a secret
+  serversLoaded: false,
   traffic: { uploadTotal: 0, downloadTotal: 0, connections: 0 },
   series: { direct: [], tunnel: [], desync: [], proxy: [] }, // bytes per 2 s tick, this session
   quit: false,
@@ -37,6 +39,8 @@ function applyState(p) {
   S.loaded = true;
   const newError = S.error && (S.error.code !== prevErr || prevState !== S.state) ? S.error : null;
   notify('state', { newError, prevState });
+  // There is no server event: a connect that failed with tunnel_missing, or a switch, may have changed the list.
+  if (prevState !== S.state) refreshServers();
 }
 
 function setEngineDown() {
@@ -49,8 +53,9 @@ function setEngineDown() {
 
 export async function refresh() {
   try {
-    const [st, routes] = await Promise.all([api.getState(), api.getRoutes()]);
+    const [st, routes, servers] = await Promise.all([api.getState(), api.getRoutes(), api.getServers().catch(() => null)]);
     S.routes = routes;
+    if (servers) { S.servers = servers; S.serversLoaded = true; }
     applyState(st);
     notify('routes', {});
     return true;
@@ -59,6 +64,21 @@ export async function refresh() {
     return false;
   }
 }
+
+/** Refetch the server list (the engine has no event for it). Returns the list, or null if the call failed. */
+export async function refreshServers() {
+  try {
+    S.servers = await api.getServers();
+    S.serversLoaded = true;
+    notify('servers', {});
+    return S.servers;
+  } catch (e) {
+    if (e.code === 'engine_unreachable') setEngineDown();
+    return null;
+  }
+}
+
+export const activeServer = () => S.servers.find((s) => s.active) || null;
 
 async function refreshRoutes() {
   try { S.routes = await api.getRoutes(); notify('routes', {}); } catch { /* next state event fixes it */ }
@@ -97,6 +117,7 @@ export function startLive() {
       }
       notify('check', c);
     },
+    shutdown: () => { if (!S.quit) setEngineDown(); }, // last event before the engine closes the stream
     error: () => {
       // The stream dropped. If the engine is gone, show it and keep probing.
       if (unsub) { unsub(); unsub = null; }
@@ -141,6 +162,30 @@ export async function checkNow(domains) {
     await api.checkNow(domains);
   } catch (e) { S.checking = false; notify('check', { running: false }); actionFailed(e); }
 }
+
+// ---------- servers ----------
+// Each throws the ApiError on failure; the caller shows serverErrorText(e, ctx) where the user is looking.
+
+/** Adds a server (never activated by the engine). Resolves with the new Server object. */
+export async function addServer(input, name) {
+  const s = await api.addServer(input, name);
+  await refreshServers();
+  return s;
+}
+
+/** Makes a server the active one. Resolves with { reloaded } (true: connected, the tunnel restarts once). */
+export async function activateServer(id) {
+  const r = await api.activateServer(id);
+  await refreshServers();
+  return { reloaded: !!(r && r.reloaded) };
+}
+
+export async function removeServer(id) {
+  await api.deleteServer(id);
+  await refreshServers();
+}
+
+export const testServer = (body) => api.testServer(body);
 
 export async function restartEngine() {
   try {
