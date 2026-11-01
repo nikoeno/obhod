@@ -93,6 +93,7 @@ singbox:
 desync:
     engine: ""
     binary: ""
+    preset: ""
     strategy: []
     lua_init: []
     exclude_ips: []

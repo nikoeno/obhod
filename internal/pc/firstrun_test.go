@@ -25,6 +25,7 @@ import (
 	"github.com/nikoejento/obhod/internal/lib/netif"
 	"github.com/nikoejento/obhod/internal/lib/paths"
 	"github.com/nikoejento/obhod/internal/lib/route"
+	"github.com/nikoejento/obhod/internal/pc/desync"
 	"github.com/nikoejento/obhod/internal/pc/status"
 )
 
@@ -302,6 +303,30 @@ func TestConnectMissingProgramIsSpecific(t *testing.T) {
 		})
 	}
 
+	// The default preset names fake payload files next to the engine; a missing one is the same packaging
+	// problem as a missing program.
+	t.Run("a preset payload is missing", func(t *testing.T) {
+		h := newHarness(t, baseTable(t), WithUI(true))
+		h.app.cfg.Desync.Strategy = nil // no custom strategy: the default preset applies
+		var asked []string
+		h.d.fileExists = func(p string) bool { asked = append(asked, p); return false }
+		h.start()
+		h.waitRunning()
+		if err := h.app.Connect(context.Background()); err == nil {
+			t.Fatal("connect succeeded without the fake payloads")
+		}
+		le := h.app.LastError()
+		if le == nil || le.Code != CodeProgramMissing || le.Message != "A required program is missing next to the app. Reinstall the app." {
+			t.Fatalf("LastError = %+v", le)
+		}
+		if len(asked) == 0 || !strings.Contains(asked[0], "/fake/") {
+			t.Fatalf("payload files asked for: %v", asked)
+		}
+		if _, ok := h.procs.spec(nameSingBox); ok {
+			t.Fatal("sing-box was started")
+		}
+	})
+
 	t.Run("no site needs the desync engine", func(t *testing.T) {
 		h := newHarness(t, tbl(t, ent("plain.example", route.Direct), ent("blocked.example", route.Tunnel)), WithUI(true))
 		h.d.findBinary = missing("winws2", "nfqws2")
@@ -311,6 +336,37 @@ func TestConnectMissingProgramIsSpecific(t *testing.T) {
 			t.Fatalf("connect must not need the desync engine when no site uses it: %v", err)
 		}
 	})
+}
+
+// The default app.yaml names the default preset and lists every preset a user can choose, so the file and the
+// catalogue cannot drift apart.
+func TestDefaultConfigNamesEveryPreset(t *testing.T) {
+	code, err := os.ReadFile(filepath.Join("..", "..", "api", "desktop", "defaultconfig.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile("(?s)const defaultConfigYAML = `(.*?)`").FindSubmatch(code)
+	if m == nil {
+		t.Fatal("defaultConfigYAML not found")
+	}
+	text := string(m[1])
+	if !strings.Contains(text, "\ndesync:\n  preset: "+desync.DefaultPreset+"\n") {
+		t.Errorf("the default config does not set desync.preset to %q", desync.DefaultPreset)
+	}
+	for _, id := range desync.PresetIDs() {
+		if !strings.Contains(text, id) {
+			t.Errorf("the default config does not mention preset %q", id)
+		}
+	}
+	for _, word := range []string{"custom", "auto"} {
+		if !strings.Contains(text, "preset: "+word) {
+			t.Errorf("the default config does not explain preset: %s", word)
+		}
+	}
+	cfg := writeRealDefaultConfig(t, paths.FromRoot(t.TempDir()))
+	if cfg.Desync.Preset != desync.DefaultPreset {
+		t.Errorf("loaded preset = %q", cfg.Desync.Preset)
+	}
 }
 
 func TestClassifyProgramMissing(t *testing.T) {

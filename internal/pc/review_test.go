@@ -325,6 +325,25 @@ func TestNFTMissing(t *testing.T) {
 	}
 }
 
+func TestNFTMissingDestinationPorts(t *testing.T) {
+	setup := []string{
+		`nft 'add rule inet splitter postrouting oifname "eth0" tcp dport { 80, 443, 2053 } queue num 200 bypass'`,
+		`nft 'add rule inet splitter postrouting oifname "eth0" udp dport { 443 } queue num 200 bypass'`,
+	}
+	ok := "oifname \"eth0\" tcp dport { 80, 443, 2053 } queue\noifname \"eth0\" udp dport { 443 } queue"
+	if m := nftMissing(ok, setup); len(m) != 0 {
+		t.Fatalf("missing = %v", m)
+	}
+	// A table written for the custom strategy (ports 80, 443, tcp only) lacks a port and the udp rule.
+	old := "oifname \"eth0\" tcp dport { 80, 443 } queue"
+	got := strings.Join(nftMissing(old, setup), "; ")
+	for _, want := range []string{"tcp port 2053", "udp dport"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing = %q, want it to mention %q", got, want)
+		}
+	}
+}
+
 func TestRotatorRecoversFromFailedReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app.log")
 	r, err := newRotator(path, 1<<20, 2)

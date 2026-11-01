@@ -9,6 +9,7 @@ import (
 var (
 	nftOifname = regexp.MustCompile(`oifname "[^"]+"`)
 	nftReturn  = regexp.MustCompile(`\{ ([^}]*) \} return`)
+	nftDport   = regexp.MustCompile(`(tcp|udp) dport \{ ([^}]*) \}`)
 )
 
 // nftMissing compares the listing of the "inet splitter" table with the setup
@@ -30,6 +31,18 @@ func nftMissing(listing string, setup []string) []string {
 	for _, cmd := range setup {
 		if m := nftOifname.FindString(cmd); m != "" && !strings.Contains(listing, m) {
 			missing = append(missing, m)
+		}
+		// The queue rules name the destination ports: a table written for another
+		// preset or for the custom strategy may lack a port or the udp rule.
+		if dm := nftDport.FindStringSubmatch(cmd); dm != nil {
+			if !strings.Contains(listing, dm[1]+" dport") {
+				missing = append(missing, dm[1]+" dport")
+			}
+			for _, item := range strings.Split(dm[2], ", ") {
+				if item = strings.TrimSpace(item); item != "" && !tokens[item] {
+					missing = append(missing, dm[1]+" port "+item)
+				}
+			}
 		}
 		sm := nftReturn.FindStringSubmatch(cmd)
 		if sm == nil {

@@ -46,6 +46,8 @@ func TestUIFirstStartCreatesDefaultConfig(t *testing.T) {
 	}
 	// Nothing but defaults and the three starter lists next to the file.
 	want := pc.DefaultConfig()
+	// The file writes out the built-in default preset so that the user sees the setting.
+	want.Desync.Preset = want.Desync.PresetID()
 	dir := filepath.Dir(cfg)
 	want.Checker.Lists.Candidates = []string{filepath.Join(dir, "lists", "candidates.txt")}
 	want.Checker.Lists.Proxy = []string{filepath.Join(dir, "lists", "proxy.txt")}

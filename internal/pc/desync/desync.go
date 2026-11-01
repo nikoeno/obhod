@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/nikoejento/obhod/internal/lib/netif"
@@ -48,6 +49,23 @@ var reservedOptions = []string{
 // Check validates the parts of c that do not depend on the table or the
 // uplink. Build calls it; the app also calls it when it loads its config.
 func (c Config) Check() error {
+	switch id := c.PresetID(); id {
+	case PresetCustom:
+	case PresetAuto:
+		return fmt.Errorf("%w: preset %q is not available yet (choose one of %s, or %q)",
+			ErrInvalidConfig, id, strings.Join(PresetIDs(), ", "), PresetCustom)
+	default:
+		if _, ok := LookupPreset(id); !ok {
+			return fmt.Errorf("%w: unknown preset %q (known: %s, %s)",
+				ErrInvalidConfig, id, strings.Join(PresetIDs(), ", "), PresetCustom)
+		}
+		if len(c.Strategy) > 0 {
+			return fmt.Errorf("%w: strategy is used only with preset %q, not with %q", ErrInvalidConfig, PresetCustom, id)
+		}
+		if len(c.Ports) > 0 {
+			return fmt.Errorf("%w: ports is used only with preset %q; preset %q chooses its own ports", ErrInvalidConfig, PresetCustom, id)
+		}
+	}
 	for _, a := range c.Strategy {
 		if strings.HasPrefix(a, "@") {
 			return fmt.Errorf("%w: strategy argument %q reads options from a file", ErrInvalidConfig, a)
@@ -96,6 +114,18 @@ func unmapped(in []netip.Prefix) []netip.Prefix {
 	return out
 }
 
+// PresetID returns the preset this config selects: Preset if set, else
+// PresetCustom when Strategy is set (an older config), else DefaultPreset.
+func (c Config) PresetID() string {
+	switch {
+	case c.Preset != "":
+		return c.Preset
+	case len(c.Strategy) > 0:
+		return PresetCustom
+	}
+	return DefaultPreset
+}
+
 // HostlistFile is the key of Plan.Files that holds the hostlist.
 const HostlistFile = "hostlist.txt"
 
@@ -116,11 +146,12 @@ type PortRange [2]uint16
 type Config struct {
 	Engine       Engine         `yaml:"engine"`        // default by GOOS
 	Binary       string         `yaml:"binary"`        // path to the engine binary
-	Strategy     []string       `yaml:"strategy"`      // zapret2 profile args (e.g. --filter-l7=tls --payload=tls_client_hello --lua-desync=...)
+	Preset       string         `yaml:"preset"`        // catalogue id (see Presets), "custom" (use Strategy) or "auto" (reserved); empty: custom if Strategy is set, else DefaultPreset
+	Strategy     []string       `yaml:"strategy"`      // zapret2 profile args (e.g. --filter-l7=tls --payload=tls_client_hello --lua-desync=...); only with preset custom
 	LuaInit      []string       `yaml:"lua_init"`      // Lua libraries to load; default zapret-lib.lua, zapret-antidpi.lua
 	ExcludeIPs   []netip.Prefix `yaml:"exclude_ips"`   // VPS IP(s); required
 	ExcludePorts []PortRange    `yaml:"exclude_ports"` // probe source-port ranges (future)
-	Ports        []uint16       `yaml:"ports"`         // TCP ports to act on; default 443, 80
+	Ports        []uint16       `yaml:"ports"`         // TCP ports to act on; default 443, 80; only with preset custom (a preset has its own)
 }
 
 // Plan is what the app needs to run the engine. A Plan without Path means
@@ -130,6 +161,7 @@ type Plan struct {
 	Path     string
 	Args     []string
 	Files    map[string][]byte // name → content (hostlist), written to the Run dir by the app
+	Requires []string          // files the arguments name (the fake payloads), slash-separated; the app checks that they exist before it starts the engine
 	Setup    []string          // commands a human must run once (nfqws: nftables rules, then an ip rule exemption for the mark); never run by us
 	Teardown []string
 }
@@ -174,44 +206,88 @@ func Build(cfg Config, uplink netif.Interface, t route.Table) (Plan, error) {
 	for i, r := range cfg.ExcludePorts {
 		ranges[i] = r
 	}
+
+	// A preset replaces Strategy and Ports: the catalogue holds its profiles,
+	// the renderer still adds the hostlist, the filters and the exclusions.
+	strategy, tcpPorts := cfg.Strategy, cfg.Ports
+	var profiles [][]string
+	var udpPorts []uint16
+	var requires []string
+	var blobs []blobUse
+	if id := cfg.PresetID(); id != PresetCustom {
+		p, _ := LookupPreset(id) // Check found it
+		r, err := renderPreset(p)
+		if err != nil {
+			return Plan{}, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+		}
+		strategy, tcpPorts = nil, r.tcp
+		profiles, udpPorts, blobs = r.profiles, r.udp, r.blobs
+		dir := fakeDirOf(cfg.Binary)
+		for _, b := range blobs {
+			requires = append(requires, dir+"/"+b.file)
+		}
+		sort.Strings(requires)
+	}
 	switch engine {
 	case WinWS:
 		out, err := winws.Render(winws.Input{
 			Binary:       cfg.Binary,
 			LuaInit:      cfg.LuaInit,
-			Strategy:     cfg.Strategy,
+			Strategy:     strategy,
 			Hostlist:     domains,
 			IfIndex:      uplink.Index,
 			ExcludeIPs:   excludeIPs,
 			ExcludePorts: ranges,
-			Ports:        cfg.Ports,
+			Ports:        tcpPorts,
+			Profiles:     profiles,
+			UDPPorts:     udpPorts,
+			Blobs:        winwsBlobs(cfg.Binary, blobs),
 		})
 		if err != nil {
 			return Plan{}, err
 		}
 		return Plan{
-			Engine: engine, Path: out.Path, Args: out.Args,
+			Engine: engine, Path: out.Path, Args: out.Args, Requires: requires,
 			Files: map[string][]byte{HostlistFile: out.Hostlist},
 		}, nil
 	default:
 		out, err := nfqws.Render(nfqws.Input{
 			Binary:       cfg.Binary,
 			LuaInit:      cfg.LuaInit,
-			Strategy:     cfg.Strategy,
+			Strategy:     strategy,
 			Hostlist:     domains,
 			Uplink:       uplink.Name,
 			ExcludeIPs:   excludeIPs,
 			ExcludePorts: ranges,
-			Ports:        cfg.Ports,
+			Ports:        tcpPorts,
+			Profiles:     profiles,
+			UDPPorts:     udpPorts,
+			Blobs:        nfqwsBlobs(cfg.Binary, blobs),
 		})
 		if err != nil {
 			return Plan{}, err
 		}
 		return Plan{
-			Engine: engine, Path: out.Path, Args: out.Args,
+			Engine: engine, Path: out.Path, Args: out.Args, Requires: requires,
 			Files:    map[string][]byte{HostlistFile: out.Hostlist},
 			Setup:    out.NFTSetup,
 			Teardown: out.NFTDown,
 		}, nil
 	}
+}
+
+func winwsBlobs(binary string, in []blobUse) []winws.Blob {
+	var out []winws.Blob
+	for _, b := range in {
+		out = append(out, winws.Blob{Name: b.name, Path: fakeDirOf(binary) + "/" + b.file})
+	}
+	return out
+}
+
+func nfqwsBlobs(binary string, in []blobUse) []nfqws.Blob {
+	var out []nfqws.Blob
+	for _, b := range in {
+		out = append(out, nfqws.Blob{Name: b.name, Path: fakeDirOf(binary) + "/" + b.file})
+	}
+	return out
 }

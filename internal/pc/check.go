@@ -120,6 +120,11 @@ func CheckConfig(ctx context.Context, cfg Config, p paths.Paths, env CheckEnv, o
 	if uerr != nil {
 		fmt.Fprintf(out, "no uplink interface (a stand-in was used for the desync plan): %v\n", uerr)
 	}
+	for _, f := range plan.Requires {
+		if !fileExists(f) {
+			fmt.Fprintf(out, "fake payload of preset %q not found (rendering checked only): %s\n", dcfg.PresetID(), f)
+		}
+	}
 	fmt.Fprintf(out, "desync plan: engine %s, %d arguments, %d setup commands\n", plan.Engine, len(plan.Args), len(plan.Setup))
 	fmt.Fprintln(out, "config ok")
 	return nil

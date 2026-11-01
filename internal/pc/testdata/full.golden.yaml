@@ -96,6 +96,7 @@ singbox:
 desync:
     engine: winws2
     binary: /opt/winws2
+    preset: custom
     strategy:
         - --filter-l7=tls
         - --lua-desync=fake

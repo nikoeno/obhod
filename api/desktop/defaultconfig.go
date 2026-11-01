@@ -18,7 +18,8 @@ var defaultListNames = []string{"candidates.txt", "proxy.txt", "block.txt"}
 var defaultLists embed.FS
 
 // defaultConfigYAML is the app.yaml written on the first `run --ui` start. Every
-// key but checker.lists stays at its built-in default. It holds no secret and no
+// key but checker.lists and desync.preset stays at its built-in default (the
+// preset is written out so the user sees it). It holds no secret and no
 // server address (servers are added through the control API).
 const defaultConfigYAML = `# splitter configuration, created on first start.
 # Every key that is not set here has a built-in default. Unknown keys are an error.
@@ -39,6 +40,26 @@ checker:
     candidates: [lists/candidates.txt]
     proxy: [lists/proxy.txt]
     block: [lists/block.txt]
+
+# DPI evasion for the sites that need it ("desync" route). The engine (winws2 on
+# Windows, nfqws2 on Linux) is started with one ready-made preset: a set of
+# profiles for HTTPS, HTTP, QUIC and the other TLS ports, translated from the
+# well-known zapret Discord/YouTube packs. It acts only on the sites the checker
+# put on the desync route; it never touches the detour server or this app's tunnel.
+#   preset: <name>   one of the names below
+#   preset: custom   use the "strategy" list (raw zapret2 arguments, for experts)
+#   preset: auto     reserved for "pick the best preset automatically"; not available yet
+# The default alt2-multisplit sends no fake packets (it only splits the first packet
+# of a connection), so it is the gentlest one; it worked best on Russian networks.
+# If a site stays blocked, try another name. All names: alt2-multisplit, alt3-hostfakesplit,
+# alt-fakedsplit, general-multisplit, alt4-fake-multisplit, alt5-multidisorder,
+# alt6-multisplit-681, alt7-multisplit-sniext, alt8-fake-badseq, alt9-hostfakesplit-ozon,
+# alt10-fake-ts, alt11-fake-multisplit, alt12-fake-multisplit-google, exp-fake-multisplit,
+# faketls-auto, faketls-auto-alt-fakedsplit, faketls-auto-alt2-multisplit,
+# faketls-auto-alt3-multisplit-ts, simple-fake, simple-fake-alt, simple-fake-alt2.
+# Presets need the fake/ folder next to the engine (the app package has it).
+desync:
+  preset: alt2-multisplit
 
 # paths:
 #   root: ""        # put all directories under one folder (portable mode)

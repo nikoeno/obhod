@@ -22,16 +22,21 @@ Knows the command-line format of winws2 (zapret2) and nothing else. zapret2 stra
 ```go
 package winws
 
+type Blob struct{ Name, Path string } // --blob=Name:@Path: a payload loaded into the Lua variable Name
+
 type Input struct {
     Binary       string   // path to winws2.exe (WinDivert.dll, WinDivert64.sys, cygwin1.dll next to it)
     LuaDir       string   // default: <dir of Binary>/lua
     LuaInit      []string // Lua files in LuaDir to load, in order; default zapret-lib.lua, zapret-antidpi.lua
-    Strategy     []string // zapret2 profile args, passed through verbatim
+    Strategy     []string // zapret2 profile args, passed through verbatim (one profile); not with Profiles
     Hostlist     []string // domains
     IfIndex      int      // uplink interface index
     ExcludeIPs   []netip.Prefix
     ExcludePorts [][2]uint16
-    Ports        []uint16
+    Ports        []uint16 // TCP destination ports (--wf-tcp-out); default 80, 443
+    Profiles     [][]string // multi-profile form (added 2026-11-01): the match and Lua options of each profile
+    UDPPorts     []uint16   // UDP destination ports (--wf-udp-out); only with Profiles
+    Blobs        []Blob     // --blob options; only with Profiles
 }
 
 type Output struct {
@@ -46,6 +51,7 @@ func Render(in Input) (Output, error)
 ## Behavior / contract
 
 - Argument order: `--wf-tcp-out=<Ports>`, `--wf-raw-filter=<filter>`, one `--lua-init=@<LuaDir>/<file>` per `LuaInit` entry, `--hostlist=hostlist.txt`, then `Strategy`.
+- With `Profiles` (decided 2026-11-01, presets): `--wf-tcp-out=<Ports>`, `--wf-udp-out=<UDPPorts>` (when set), `--wf-raw-filter`, the `--lua-init` options, one `--blob=<Name>:@<Path>` per `Blobs` entry in the given order, then every profile as `--hostlist=hostlist.txt` followed by its arguments, with `--new` between profiles. The renderer adds the hostlist to each profile itself, so a profile cannot select anything outside it, and the one raw filter (interface, tunnel exclusion, probe ports) still applies to everything. The raw filter has no UDP clause for the probe ports: they are TCP source ports. A blob `Name` must be a Lua identifier and `Path` non-empty with no line break and no `+offset` prefix; `Strategy` together with `Profiles`, an empty profile, or `UDPPorts`/`Blobs` without `Profiles` is `ErrInvalid`. `Profiles` is passed through like `Strategy`: it does not check the arguments (the caller, `internal/pc/desync`, owns the catalogue and rejects anything outside it).
 - `--wf-raw-filter` is combined with the rest of the interception filter by AND (zapret2 README). It holds `ifIdx == IfIndex`, not `ExcludeIPs` (`ip.DstAddr` / `ipv6.DstAddr`), not `ExcludePorts` (as `tcp.SrcPort`).
 - Interception is outbound only (`--wf-tcp-out`), as in the contract's "uplink only" rule. Incoming interception (`--wf-tcp-in`, needed by some `zapret-auto.lua` orchestrators) is out of scope until a strategy needs it.
 - Flag names and the WinDivert filter syntax must be verified against the **pinned zapret2 version** (1.0.5.2).

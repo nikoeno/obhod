@@ -15,6 +15,7 @@ import (
 
 	"github.com/nikoejento/obhod/internal/lib/paths"
 	"github.com/nikoejento/obhod/internal/lib/route"
+	"github.com/nikoejento/obhod/internal/pc/desync"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -87,6 +88,21 @@ func TestLoadFull(t *testing.T) {
 	goldenYAML(t, "full.golden.yaml", cfg)
 }
 
+func TestDesyncPresetSelection(t *testing.T) {
+	// The built-in default selects the default preset; an older config that sets a strategy stays custom.
+	if got := DefaultConfig().Desync.PresetID(); got != desync.DefaultPreset {
+		t.Fatalf("default preset = %q, want %q", got, desync.DefaultPreset)
+	}
+	cfg, err := LoadConfig(filepath.Join("testdata", "preset_named.yaml"))
+	if err != nil || cfg.Desync.PresetID() != "alt3-hostfakesplit" {
+		t.Fatalf("named preset: %+v, %v", cfg.Desync, err)
+	}
+	old, err := ParseConfig(strings.NewReader("desync:\n  strategy: ['--lua-desync=fake']\n"))
+	if err != nil || old.Desync.PresetID() != desync.PresetCustom {
+		t.Fatalf("strategy without preset: %q, %v", old.Desync.PresetID(), err)
+	}
+}
+
 func TestAbsoluteListPathsStay(t *testing.T) {
 	abs, err := filepath.Abs(filepath.Join("some", "dir", "list.txt"))
 	if err != nil {
@@ -105,15 +121,19 @@ func TestAbsoluteListPathsStay(t *testing.T) {
 
 func TestLoadRejects(t *testing.T) {
 	cases := map[string]string{
-		"unknown_key":         "bogus",
-		"duration":            "time.Duration",
-		"secret_in_config":    "clashsecret",
-		"secret_name":         "secrets.tunnel",
-		"non_loopback_status": "loopback",
-		"unknown_default":     "unknowndefault",
-		"log_level":           "log.level",
-		"salt_set":            "salt",
-		"unknown_engine":      "desync.engine",
+		"unknown_key":          "bogus",
+		"duration":             "time.Duration",
+		"secret_in_config":     "clashsecret",
+		"secret_name":          "secrets.tunnel",
+		"non_loopback_status":  "loopback",
+		"unknown_default":      "unknowndefault",
+		"log_level":            "log.level",
+		"salt_set":             "salt",
+		"unknown_engine":       "desync.engine",
+		"unknown_preset":       "unknown preset",
+		"preset_auto":          "not available yet",
+		"preset_with_strategy": "strategy is used only with preset",
+		"preset_with_ports":    "ports is used only with preset",
 	}
 	for name, want := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -88,6 +88,9 @@ type deps struct {
 	parentUp   func(ctx context.Context, pid int) bool
 	newSecret  func() (string, error)
 	findBinary func(name, configured string) (string, error)
+	// fileExists reports whether a file is there (the desync plan's fake
+	// payloads, see Plan.Requires). nil: not checked.
+	fileExists func(path string) bool
 	exePath    string
 }
 
@@ -121,6 +124,7 @@ func realDeps(cfg Config, p paths.Paths) (*deps, error) {
 	d.findBinary = func(name, configured string) (string, error) {
 		return findBinary(name, configured, exe, fileExists)
 	}
+	d.fileExists = fileExists
 
 	// The procman manager kills stale processes only below the directory of our binaries.
 	pc := cfg.Procman

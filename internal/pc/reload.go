@@ -93,6 +93,16 @@ func (a *App) buildPlan(ctx context.Context, b binaries, t route.Table) (desync.
 	case err != nil:
 		return desync.Plan{}, fail(ExitRuntime, "desync plan: %v", err)
 	}
+	// The preset's fake payloads sit in a folder next to the engine; a missing
+	// one is a packaging problem, reported like a missing program.
+	if a.d.fileExists != nil {
+		for _, f := range plan.Requires {
+			if !a.d.fileExists(f) {
+				return desync.Plan{}, fail(ExitConfig, "%w: the fake payload %s of the desync preset %q was not found; put it in the %s folder next to the desync engine",
+					errProgramMissing, filepath.Base(f), dcfg.PresetID(), desync.FakeDir)
+			}
+		}
+	}
 	return plan, nil
 }
 

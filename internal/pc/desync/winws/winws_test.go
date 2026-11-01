@@ -204,3 +204,83 @@ func TestRenderErrors(t *testing.T) {
 		})
 	}
 }
+
+func profilesInput() Input {
+	in := baseInput()
+	in.Strategy = nil
+	in.Ports = []uint16{443, 80, 2053}
+	in.UDPPorts = []uint16{443}
+	in.Blobs = []Blob{{Name: "fake_tls_google", Path: "C:/app/fake/tls.bin"}}
+	in.Profiles = [][]string{
+		{"--filter-udp=443", "--payload=quic_initial", "--lua-desync=fake:blob=fake_default_quic"},
+		{"--filter-tcp=80,443,2053", "--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=fake_tls_google"},
+	}
+	return in
+}
+
+func TestRenderProfiles(t *testing.T) {
+	out, err := Render(profilesInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"--wf-tcp-out=80,443,2053",
+		"--wf-udp-out=443",
+		"--wf-raw-filter=" + mustFilter(t),
+		"--lua-init=@C:/app/third_party/lua/zapret-lib.lua",
+		"--lua-init=@C:/app/third_party/lua/zapret-antidpi.lua",
+		"--blob=fake_tls_google:@C:/app/fake/tls.bin",
+		"--hostlist=hostlist.txt", "--filter-udp=443", "--payload=quic_initial", "--lua-desync=fake:blob=fake_default_quic",
+		"--new",
+		"--hostlist=hostlist.txt", "--filter-tcp=80,443,2053", "--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=fake_tls_google",
+	}
+	if strings.Join(out.Args, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("args:\n%s\nwant:\n%s", strings.Join(out.Args, "\n"), strings.Join(want, "\n"))
+	}
+	// Every profile begins with the hostlist; the raw filter (uplink, exclusions) is still the only one.
+	if n := strings.Count(strings.Join(out.Args, "\n"), "--wf-raw-filter="); n != 1 {
+		t.Fatalf("%d raw filters", n)
+	}
+}
+
+func mustFilter(t *testing.T) string {
+	t.Helper()
+	in := baseInput()
+	f, err := Filter(in.IfIndex, in.ExcludeIPs, in.ExcludePorts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func TestRenderProfilesErrors(t *testing.T) {
+	cases := map[string]func(*Input){
+		"strategy and profiles": func(in *Input) { in.Strategy = []string{"--lua-desync=fake"} },
+		"empty profile":         func(in *Input) { in.Profiles = append(in.Profiles, nil) },
+		"bad blob name":         func(in *Input) { in.Blobs = []Blob{{Name: "a-b", Path: "x"}} },
+		"blob name with colon":  func(in *Input) { in.Blobs = []Blob{{Name: "a:@b", Path: "x"}} },
+		"empty blob path":       func(in *Input) { in.Blobs = []Blob{{Name: "ok", Path: ""}} },
+		"blob offset":           func(in *Input) { in.Blobs = []Blob{{Name: "ok", Path: "+5@x"}} },
+		"udp port zero":         func(in *Input) { in.UDPPorts = []uint16{0} },
+	}
+	for name, mut := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := profilesInput()
+			mut(&in)
+			if _, err := Render(in); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+	// Blobs and UDP ports without profiles would be silently ignored.
+	in := baseInput()
+	in.UDPPorts = []uint16{443}
+	if _, err := Render(in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("UDPPorts without Profiles: %v", err)
+	}
+	in = baseInput()
+	in.Blobs = []Blob{{Name: "x", Path: "y"}}
+	if _, err := Render(in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Blobs without Profiles: %v", err)
+	}
+}

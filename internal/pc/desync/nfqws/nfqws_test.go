@@ -226,3 +226,79 @@ func TestErrors(t *testing.T) {
 		})
 	}
 }
+
+func profilesInput() Input {
+	in := baseInput()
+	in.Strategy = nil
+	in.Ports = []uint16{443, 80, 2053}
+	in.UDPPorts = []uint16{443}
+	in.Blobs = []Blob{{Name: "fake_tls_google", Path: "/opt/splitter/fake/tls.bin"}}
+	in.Profiles = [][]string{
+		{"--filter-udp=443", "--payload=quic_initial", "--lua-desync=fake:blob=fake_default_quic"},
+		{"--filter-tcp=80,443,2053", "--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=fake_tls_google"},
+	}
+	return in
+}
+
+func TestProfiles(t *testing.T) {
+	out, err := Render(profilesInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"--qnum=200",
+		"--lua-init=@/opt/splitter/lua/zapret-lib.lua",
+		"--lua-init=@/opt/splitter/lua/zapret-antidpi.lua",
+		"--uid=0:0",
+		"--blob=fake_tls_google:@/opt/splitter/fake/tls.bin",
+		"--hostlist=hostlist.txt", "--filter-udp=443", "--payload=quic_initial", "--lua-desync=fake:blob=fake_default_quic",
+		"--new",
+		"--hostlist=hostlist.txt", "--filter-tcp=80,443,2053", "--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=fake_tls_google",
+	}
+	if strings.Join(out.Args, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("args:\n%s\nwant:\n%s", strings.Join(out.Args, "\n"), strings.Join(want, "\n"))
+	}
+	setup := strings.Join(out.NFTSetup, "\n")
+	for _, w := range []string{
+		`oifname "eth0" tcp dport { 80, 443, 2053 } meta mark and 0x40000000 == 0 ct original packets 1-12 queue num 200 bypass`,
+		`oifname "eth0" udp dport { 443 } meta mark and 0x40000000 == 0 ct original packets 1-12 queue num 200 bypass`,
+	} {
+		if !strings.Contains(setup, w) {
+			t.Fatalf("setup lacks %q:\n%s", w, setup)
+		}
+	}
+	// The early returns for the tunnel address and the probe ports come before both queue rules.
+	if i, j := strings.Index(setup, "ip daddr { 203.0.113.7/32 } return"), strings.Index(setup, "udp dport"); i < 0 || j < i {
+		t.Fatalf("exclusions do not come first:\n%s", setup)
+	}
+	// Without UDP ports there is no udp rule: the custom form is unchanged.
+	plain, err := Render(baseInput())
+	if err != nil || strings.Contains(strings.Join(plain.NFTSetup, "\n"), "udp dport") {
+		t.Fatalf("custom setup has a udp rule: %v", err)
+	}
+}
+
+func TestProfilesErrors(t *testing.T) {
+	cases := map[string]func(*Input){
+		"strategy and profiles": func(in *Input) { in.Strategy = []string{"--lua-desync=fake"} },
+		"empty profile":         func(in *Input) { in.Profiles = append(in.Profiles, nil) },
+		"bad blob name":         func(in *Input) { in.Blobs = []Blob{{Name: "a-b", Path: "x"}} },
+		"empty blob path":       func(in *Input) { in.Blobs = []Blob{{Name: "ok", Path: ""}} },
+		"blob offset":           func(in *Input) { in.Blobs = []Blob{{Name: "ok", Path: "+5@x"}} },
+		"udp port zero":         func(in *Input) { in.UDPPorts = []uint16{0} },
+	}
+	for name, mut := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := profilesInput()
+			mut(&in)
+			if _, err := Render(in); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+	in := baseInput()
+	in.UDPPorts = []uint16{443}
+	if _, err := Render(in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("UDPPorts without Profiles: %v", err)
+	}
+}

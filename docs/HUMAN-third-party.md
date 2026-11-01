@@ -174,3 +174,41 @@ Then check that they start (no admin needed for these):
 - Records the pinned versions in `singbox`, `winws`, `nfqws` `API.md` and checks flag/field names against those versions.
 - Adds the `//go:build integration` test that runs `sing-box check` with `third_party/bin/<os>-<arch>/sing-box`, skipping when the file is missing.
 - Implements D1–D3 in `internal/pc` (M9/M10) once you decide.
+
+## 6. Fake payloads for the desync presets (added 2026-11-01)
+
+The desync presets (`internal/pc/desync/PRESETS.md`) send fake packets and decoy prefixes built from small binary files. They are not executables, but they are still third-party data, so they follow the same rules: never committed, listed here with a checksum. The renderer looks for them in a **`fake/` folder next to the engine binary** (`third_party/bin/windows-amd64/fake/` in development; `<app folder>/fake/` in the packaged app) and `splitter` refuses to start the engine, with `program_missing`, if a file the chosen preset needs is absent. The built-in fakes of the engine (`fake_default_tls`, `fake_default_http`, `fake_default_quic`) need no file.
+
+**Source and status.** Upstream source/URL of the pack's own files: **unknown, not guessed.** They were taken from the folder `bin/` of the user-provided pack "zapret-discord-youtube 1.10.1" (the pack's `service.bat` mentions a GitHub project called Flowseal/zapret-discord-youtube for its list updates; I did not check that the payloads come from there). Two of them (`tls_clienthello_www_google_com.bin`, `quic_initial_www_google_com.bin`) and `stun.bin` are **byte-identical to files in the pinned official archive** `zapret2-v1.0.5.2.zip` (`zapret2-v1.0.5.2/files/fake/`, archive sha256 `f585590b...d4ac`, the one in `third_party/manifest.yaml`); I compared the hashes against the extracted copy of that archive in the Downloads folder. The others exist only in the pack.
+
+For local testing the 15 `*.bin` files of the pack's `bin/` were copied into `third_party/bin/windows-amd64/fake/` (git-ignored). Only the first five are used by a preset today; the rest are listed for the later stages (Discord voice and game UDP profiles, not representable yet).
+
+| File | Size | sha256 | Used by | Also in the official zapret2 1.0.5.2 archive |
+|---|---|---|---|---|
+| `tls_clienthello_www_google_com.bin` | 681 | `936c2bee4cfb80aa3c426b2dcbcc834b3fbcd1adb17172959dc569c73a14275c` | 15 presets, **including the default** | yes (`files/fake/`, same hash) |
+| `quic_initial_www_google_com.bin` | 1200 | `f4589c57749f956bb30538197a521d7005f8b0a8723b4707e72405e51ddac50a` | all 21 presets (QUIC profile), **including the default** | yes (same hash) |
+| `tls_clienthello_max_ru.bin` | 664 | `4ee0870abe0a0128600b0095189987ba1d210dae8bf963bc725aff49cf922624` | 15 presets | no |
+| `tls_clienthello_4pda_to.bin` | 284 | `eefeaf09dde8d69b1f176212541f63c68b314a33a335eced99a8a29f17254da8` | `general-multisplit`, `alt10-fake-ts` | no |
+| `stun2.bin` | 120 | `b7c2497496039c541f7337ac8536813f0a1cf52363ab2faa5213b7816d458813` | `exp-fake-multisplit` | no |
+| `stun.bin` | 100 | `9cd5469309780ca56c0bd97266524a48c7ee529d02c3179cfecb20b260a59641` | none (prefix of concatenated fakes, not translatable) | yes (same hash) |
+| `ACTIVE_DISCORD_UDP.bin` | 1200 | `2fe18b3bd20807d36704d0b072092ee49ae84edca907a4420ab9a0f0f28fddcf` | none (Discord voice profile, left out); same bytes as `quic_initial_steamcommunity_com.bin` | no |
+| `ACTIVE_GAME_UDP.bin` | 1250 | `e065870cb0d13152e6132807bbf42218a9e7cd8d96f5602b61674cc540f3a56e` | none (game UDP profile, left out); same bytes as `quic_initial_4pda.to.bin` and `quic_initial_dbankcloud_ru.bin` | no |
+| `quic_initial_4pda.to.bin` | 1250 | `e065870c...` (as `ACTIVE_GAME_UDP.bin`) | none | no |
+| `quic_initial_5ka_ru.bin` | 1250 | `247dcd97f53bfae5482e4b2b66acdb01e48ee6c29c5ca526c9b241fa38c233b5` | none (not referenced by any pack file) | no |
+| `quic_initial_dbankcloud_ru.bin` | 1250 | `e065870c...` (as `ACTIVE_GAME_UDP.bin`) | none (not referenced) | no |
+| `quic_initial_rutube_ru.bin` | 1357 | `74b1dfbdec125263c9407436658b0a848b8f0a934b8063d11571a6a2146a4a7b` | none (not referenced) | no |
+| `quic_initial_steamcommunity_com.bin` | 1200 | `2fe18b3b...` (as `ACTIVE_DISCORD_UDP.bin`) | none (not referenced) | no |
+| `quic_initial_tencent_com.bin` | 1231 | `d250051d6200946a7ba0629c59c5641432957fa3513081a6c3c5aaa91a62ac03` | none (not referenced) | no |
+| `tls_clienthello_5ka_ru.bin` | 654 | `1e8871e272591c5a277d38a6166af597c1fecb1cf58e85162e8f1968ec08d018` | none (not referenced) | no |
+
+**To do for the human (packaging; the agent did not change `third_party/manifest.yaml` or `scripts/app-files.txt`, because `scripts/fetch/appfiles_test.go` requires the two to list the same files and a hash or URL must not be guessed):**
+
+- [ ] Decide how the packaged app gets the five payload files the presets use. Without them the default preset cannot start the engine in the packaged app (`program_missing` at the first connect that has a desync site).
+- [ ] The two payloads of the **default preset** can come from the pinned official archive with no new download or URL. Proposed manifest lines (Windows; the same two for the Linux platforms with `to: fake/...`), hashes verified against the archive's files:
+  ```yaml
+  - { from: zapret2-v1.0.5.2/files/fake/tls_clienthello_www_google_com.bin, to: fake/tls_clienthello_www_google_com.bin, sha256: 936c2bee4cfb80aa3c426b2dcbcc834b3fbcd1adb17172959dc569c73a14275c }
+  - { from: zapret2-v1.0.5.2/files/fake/quic_initial_www_google_com.bin,    to: fake/quic_initial_www_google_com.bin,    sha256: f4589c57749f956bb30538197a521d7005f8b0a8723b4707e72405e51ddac50a }
+  ```
+  and then the lines `fake/tls_clienthello_www_google_com.bin` and `fake/quic_initial_www_google_com.bin` in `scripts/app-files.txt` (keep the test green: it compares the two lists). With only these two files, five presets work: `alt2-multisplit` (default), `alt5-multidisorder`, `alt6-multisplit-681`, `alt7-multisplit-sniext`, `alt9-hostfakesplit-ozon`.
+- [ ] `tls_clienthello_max_ru.bin`, `tls_clienthello_4pda_to.bin` and `stun2.bin` are needed by the other 16 presets and are **not** in the official archive. Either find an official upstream release that you trust (I will not guess a URL), or keep these presets unavailable in the packaged app until you do; they work in development with the copies in `third_party/bin/windows-amd64/fake/`. The fetch tool can handle them like any other pinned file once a URL and sha256 exist.
+- [ ] `go run ./scripts/fetch -check -platform all` knows nothing about `fake/` until the manifest lists it; the development copies are only there for local runs.
