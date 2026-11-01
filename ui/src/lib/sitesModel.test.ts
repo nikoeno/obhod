@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Route, RouteInfo } from '../backend/types';
-import { countLine, effectiveFilter, emptyText, filterSites, historyRows, listView, panelFacts, parseFilter, siteTabs, sourceWord } from './sitesModel';
+import { pages } from '../../design/copy';
+import { countLine, effectiveFilter, emptyText, filterSites, historyRows, listView, isDegraded, panelFacts, parseFilter, siteTabs, sourceWord } from './sitesModel';
 
 const NOW = Date.parse('2026-11-01T12:00:00Z');
 const r = (domain: string, route: Route, o: Partial<RouteInfo> = {}): RouteInfo => ({
@@ -114,5 +115,21 @@ describe('rules of the user', () => {
     expect(tabs.find((t) => t.id === 'block')).toMatchObject({ label: 'Blocked by you', count: 1 });
     expect(tabs.find((t) => t.id === 'tunnel')?.count).toBe(2);
     expect(filterSites(rows, 'block', '').map((x) => x.domain)).toEqual(['mine.example']);
+  });
+});
+
+describe('degraded sites (no detour server)', () => {
+  it('flags only a Blocked-path row the engine marks degraded', () => {
+    expect(isDegraded(r('a.example', 'tunnel', { degraded: true }))).toBe(true);
+    expect(isDegraded(r('a.example', 'tunnel', { degraded: false }))).toBe(false);
+    expect(isDegraded(r('a.example', 'tunnel'))).toBe(false); // older engine
+    expect(isDegraded(r('a.example', 'direct', { degraded: true }))).toBe(false);
+  });
+  it('the side panel facts carry the flag; the copy has a label and an explaining sentence without network words', () => {
+    expect(panelFacts(r('a.example', 'tunnel', { degraded: true }), NOW).degraded).toBe(true);
+    expect(panelFacts(r('a.example', 'tunnel'), NOW).degraded).toBe(false);
+    expect(pages.sites.noDetour.flag).toBe('No detour');
+    expect(pages.sites.noDetour.note).toMatch(/opens directly/);
+    expect(`${pages.sites.noDetour.flag} ${pages.sites.noDetour.note}`).not.toMatch(/tunnel|proxy|sing-?box|vpn|dns/i);
   });
 });

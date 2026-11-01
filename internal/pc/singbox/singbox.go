@@ -80,6 +80,10 @@ type Config struct {
 type Outbounds struct {
 	Tunnel json.RawMessage // VLESS+Reality outbound; the tag is forced to "tunnel"
 	Proxy  json.RawMessage // optional SOCKS/HTTP outbound; the tag is forced to "proxy"
+	// TunnelDirect renders the config without a tunnel outbound (Tunnel must be empty):
+	// every domain whose route is tunnel, and the final route, use the direct outbound.
+	// Without it an empty Tunnel is ErrNoTunnel.
+	TunnelDirect bool
 }
 
 type obj = map[string]any
@@ -100,8 +104,14 @@ func Generate(cfg Config, ob Outbounds, t route.Table) ([]byte, error) {
 	if cfg.ClashSecret == "" {
 		return nil, fmt.Errorf("%w: ClashSecret is empty (the Clash API would be open to every local process)", ErrInvalidCfg)
 	}
-	if len(ob.Tunnel) == 0 {
+	switch {
+	case ob.TunnelDirect && len(ob.Tunnel) > 0:
+		return nil, fmt.Errorf("%w: TunnelDirect with a tunnel outbound", ErrInvalidCfg)
+	case len(ob.Tunnel) == 0 && !ob.TunnelDirect:
 		return nil, ErrNoTunnel
+	}
+	if ob.TunnelDirect {
+		t = tunnelAsDirect(t)
 	}
 	if len(ob.Proxy) == 0 && len(t.Domains(route.Proxy)) > 0 {
 		return nil, ErrNoProxy
@@ -124,14 +134,19 @@ func Generate(cfg Config, ob Outbounds, t route.Table) ([]byte, error) {
 		return nil, fmt.Errorf("%w: TUN address %q", ErrInvalidCfg, tunAddr)
 	}
 
-	tunnel, err := tagged(ob.Tunnel, TagTunnel)
-	if err != nil {
-		return nil, fmt.Errorf("singbox: tunnel outbound: %w", err)
-	}
 	outbounds := []any{
 		obj{"type": "direct", "tag": TagDirect},
 		obj{"type": "direct", "tag": TagDesync},
-		tunnel,
+	}
+	final := TagTunnel
+	if ob.TunnelDirect {
+		final = TagDirect
+	} else {
+		tunnel, err := tagged(ob.Tunnel, TagTunnel)
+		if err != nil {
+			return nil, fmt.Errorf("singbox: tunnel outbound: %w", err)
+		}
+		outbounds = append(outbounds, tunnel)
 	}
 	if len(ob.Proxy) > 0 {
 		proxy, err := tagged(ob.Proxy, TagProxy)
@@ -231,7 +246,7 @@ func Generate(cfg Config, ob Outbounds, t route.Table) ([]byte, error) {
 		"outbounds": outbounds,
 		"route": obj{
 			"rules":                   rules,
-			"final":                   TagTunnel,
+			"final":                   final,
 			"auto_detect_interface":   true,
 			"default_domain_resolver": obj{"server": tagDNSDirect},
 		},
@@ -244,6 +259,21 @@ func Generate(cfg Config, ob Outbounds, t route.Table) ([]byte, error) {
 		return nil, fmt.Errorf("singbox: marshal: %w", err)
 	}
 	return append(out, '\n'), nil
+}
+
+// tunnelAsDirect returns t with every tunnel entry turned into a direct one
+// (the table keeps its normalized order). A tunnel entry below a desync parent
+// still renders direct, like any direct entry there.
+func tunnelAsDirect(t route.Table) route.Table {
+	entries := make([]route.Entry, len(t.Entries))
+	copy(entries, t.Entries)
+	for i := range entries {
+		if entries[i].Route == route.Tunnel {
+			entries[i].Route = route.Direct
+		}
+	}
+	t.Entries = entries
+	return t
 }
 
 // level holds the entries of one nesting level (the number of other table

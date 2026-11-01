@@ -1,7 +1,7 @@
 // Pure view models for Home: the big button (docs/UI.md section 4) and the first-run card
 // (section 6). No Vue here, so they are unit tested directly.
 
-import { bigButton } from '../../design/copy';
+import { bigButton, firstRun, pages } from '../../design/copy';
 import type { ConnState, EngineErrorBody, Server, Snapshot } from '../backend/types';
 import { errorInfo, type ErrorInfo } from './errors';
 import { fill, pct } from './format';
@@ -26,7 +26,7 @@ export interface HomeInput {
   startError: { code: string; message?: string } | null;
   state: ConnState;
   error: EngineErrorBody | null;
-  snapshot: Pick<Snapshot, 'Savings'> | null;
+  snapshot: (Pick<Snapshot, 'Savings'> & Partial<Pick<Snapshot, 'Tunnel'>>) | null;
 }
 
 export function buttonModel(s: HomeInput): ButtonModel {
@@ -94,15 +94,33 @@ export function subAction(m: ButtonModel, engineDown: boolean, startError: { cod
   }
 }
 
-export type SetupCard = 'none' | 'pick' | 'add' | 'skipped';
+export type DetourNotice = 'none' | 'pick' | 'add';
 
 /**
- * First run (docs/UI.md section 6): no active server. With servers saved but none active the card
- * asks to pick one; with none, to add one, or (after "Skip for now") a reminder banner.
+ * The detour-server notice on Home (docs/UI.md section 6). It never blocks Start: the engine
+ * connects without a server (`Tunnel: "none"`). `add`: no server at all; `pick`: servers are saved
+ * but none is in use (a new server is never activated by itself). Nothing while a server is in use,
+ * also while it is being switched to (connected, `Tunnel` still `none` until the reload is done).
  */
-export function setupCard(opts: { engineDown: boolean; serversLoaded: boolean; servers: Server[]; skipped: boolean }): SetupCard {
+export function detourNotice(opts: { engineDown: boolean; serversLoaded: boolean; servers: Server[] }): DetourNotice {
   if (opts.engineDown || !opts.serversLoaded) return 'none';
   if (opts.servers.some((s) => s.active)) return 'none';
-  if (opts.servers.length) return 'pick';
-  return opts.skipped ? 'skipped' : 'add';
+  return opts.servers.length ? 'pick' : 'add';
+}
+
+export interface DetourNoticeText { title: string; text: string }
+
+/** Words of the notice: "Running without ..." while the app is on without a detour, a calm invitation while it is off. */
+export function detourNoticeText(kind: DetourNotice, running: boolean): DetourNoticeText | null {
+  if (kind === 'none') return null;
+  if (running) return { title: firstRun.runningTitle, text: kind === 'pick' ? firstRun.pickText : firstRun.running };
+  return kind === 'pick' ? { title: firstRun.pickTitle, text: firstRun.pickText } : { title: firstRun.detourTitle, text: firstRun.detour };
+}
+
+/** True when the engine says it runs, or would run, without a detour server. An older engine (no field) is `ready`. */
+export const noDetour = (s: Pick<Snapshot, 'Tunnel'> | null | undefined): boolean => s?.Tunnel === 'none';
+
+/** The muted line under the Blocked card while there is no detour server. */
+export function blockedCaveat(engineDown: boolean, s: Pick<Snapshot, 'Tunnel'> | null | undefined): string {
+  return !engineDown && noDetour(s) ? pages.home.cardNoDetour : '';
 }

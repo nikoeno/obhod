@@ -53,13 +53,76 @@ describe('store with the fake backend', () => {
     expect(got[0]).toEqual(expect.arrayContaining([expect.stringContaining('nft add table inet splitter')]));
   });
 
-  it('no server: Start fails with tunnel_missing and the list is empty', async () => {
+  it('no server: Start works in degraded mode (Tunnel none, tunnel sites flagged)', async () => {
     const { store } = makeStore({ scenario: 'no-server' });
     await store.init();
     expect(store.S.servers).toEqual([]);
     expect(store.S.serversLoaded).toBe(true);
+    expect(store.S.snapshot?.Tunnel).toBe('none'); // disconnected: no server in use
+    await store.toggleConnection();
+    await until(() => store.S.state === 'connected');
+    expect(store.S.error).toBeNull();
+    expect(store.S.snapshot?.Tunnel).toBe('none');
+    const tunnel = store.S.routes.filter((r) => r.route === 'tunnel');
+    expect(tunnel.length).toBeGreaterThan(0);
+    expect(tunnel.every((r) => r.degraded === true)).toBe(true);
+    expect(store.S.routes.filter((r) => r.route !== 'tunnel').every((r) => r.degraded === false)).toBe(true);
+  });
+
+  it('adding and activating a server while connected without one flips Tunnel to ready and clears the flags', async () => {
+    const { store } = makeStore({ scenario: 'no-server' });
+    await store.init();
+    await store.toggleConnection();
+    await until(() => store.S.state === 'connected');
+    const s = await store.addServer('vless://user@192.0.2.5:443#Mine');
+    expect(store.S.snapshot?.Tunnel).toBe('none'); // saved, not in use
+    const r = await store.activateServer(s.id);
+    expect(r.reloaded).toBe(true);
+    await until(() => store.S.snapshot?.Tunnel === 'ready' && store.S.state === 'connected');
+    await until(() => store.S.routes.every((x) => !x.degraded));
+  });
+
+  it('a failed switch keeps Tunnel none and the flags', async () => {
+    const { store, backend } = makeStore({ scenario: 'no-server' });
+    backend.dev!.setFlag('reloadFails', true);
+    await store.init();
+    await store.toggleConnection();
+    await until(() => store.S.state === 'connected');
+    const s = await store.addServer('vless://user@192.0.2.5:443');
+    await store.activateServer(s.id);
+    await until(() => store.S.error?.code === 'connect_failed');
+    expect(store.S.snapshot?.Tunnel).toBe('none');
+    expect(store.S.routes.some((x) => x.degraded)).toBe(true);
+  });
+
+  it('disconnected: activating a server flips Tunnel to ready; deleting it flips back', async () => {
+    const { store } = makeStore({ scenario: 'no-server' });
+    await store.init();
+    const s = await store.addServer('vless://user@192.0.2.5:443');
+    expect(store.S.snapshot?.Tunnel).toBe('none');
+    expect((await store.activateServer(s.id)).reloaded).toBe(false);
+    expect(store.S.snapshot?.Tunnel).toBe('ready');
+    expect(store.S.routes.some((x) => x.degraded)).toBe(false);
+    await store.removeServer(s.id);
+    expect(store.S.snapshot?.Tunnel).toBe('none');
+    expect(store.S.routes.some((x) => x.degraded)).toBe(true);
+  });
+
+  it('a normal run has Tunnel ready and no flags', async () => {
+    const { store } = makeStore();
+    await store.init();
+    await store.toggleConnection();
+    await until(() => store.S.state === 'connected');
+    expect(store.S.snapshot?.Tunnel).toBe('ready');
+    expect(store.S.routes.some((x) => x.degraded)).toBe(false);
+  });
+
+  it('a server that cannot be used still fails with tunnel_missing', async () => {
+    const { store } = makeStore({ scenario: 'tunnel-missing' });
+    await store.init();
     await store.toggleConnection();
     await until(() => store.S.error?.code === 'tunnel_missing');
+    expect(store.S.state).toBe('disconnected');
   });
 
   it('a crash while connected drops to disconnected with crashed', async () => {

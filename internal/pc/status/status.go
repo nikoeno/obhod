@@ -34,7 +34,16 @@ type Snapshot struct {
 	Processes []Process
 	Warnings  []string
 	Recent    []Change // last route changes
+	// Tunnel is TunnelReady when a detour server is in use, TunnelNone when there is none: then the routes
+	// that name the tunnel are served direct (empty from an older source: unknown).
+	Tunnel string
 }
+
+// The values of Snapshot.Tunnel.
+const (
+	TunnelReady = "ready"
+	TunnelNone  = "none"
+)
 
 // Process is one managed process.
 type Process struct {

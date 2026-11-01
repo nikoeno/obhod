@@ -89,6 +89,7 @@ func (s *statusSource) Snapshot() status.Snapshot {
 		Routes:    make(map[route.Route]int, len(st.Counts)),
 		Traffic:   map[route.Route]int64{},
 		Warnings:  append([]string(nil), st.Warnings...),
+		Tunnel:    a.tunnelStatus(),
 	}
 	for r, n := range st.Counts {
 		snap.Routes[r] = n

@@ -76,6 +76,9 @@ export function sourceWord(source: string): string {
 
 export const routeWord = (r: string): string => routeCopy[r as Route]?.word ?? r;
 
+/** A Blocked site while there is no detour server: it opens directly and may not load. */
+export const isDegraded = (r: Pick<RouteInfo, 'route' | 'degraded'>): boolean => r.route === 'tunnel' && r.degraded === true;
+
 export interface HistoryRow { text: string; time: string; tech: string }
 
 /** Route changes of one site, newest first. The engine name is the Details-only tech tag. */
@@ -86,11 +89,12 @@ export function historyRows(history: Change[] | undefined): HistoryRow[] {
     .map((c) => ({ text: `${routeWord(c.From)} → ${routeWord(c.To)}`, time: fmtTime(c.At), tech: `${c.From} → ${c.To}` }));
 }
 
-export interface PanelFacts { word: string; long: string; engine: string; dot: string; since: string; decided: string; lastCheck: string; byUser: boolean }
+export interface PanelFacts { degraded: boolean; word: string; long: string; engine: string; dot: string; since: string; decided: string; lastCheck: string; byUser: boolean }
 
 export function panelFacts(r: RouteInfo, now = Date.now()): PanelFacts {
   const meta = routeCopy[r.route];
   return {
+    degraded: isDegraded(r),
     word: meta?.word ?? r.route,
     long: meta?.long ?? r.route,
     engine: r.route,

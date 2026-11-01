@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"net/netip"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,11 +16,15 @@ import (
 	"github.com/nikoejento/obhod/internal/pc/singbox"
 )
 
+// noTunnelExclude fills desync.Config.ExcludeIPs when no tunnel server is in use.
+var noTunnelExclude = netip.MustParsePrefix("192.0.2.1/32")
+
 // rendered is the output of the two generators for one table.
 type rendered struct {
 	plan    desync.Plan
 	planErr error // the plan could not be built; the sing-box config is still valid
 	singBox []byte
+	tunnel  bool // the sing-box config has a tunnel outbound (false: degraded mode)
 }
 
 // render builds the desync plan (when wantPlan) and the sing-box config for t.
@@ -34,11 +39,14 @@ func (a *App) render(ctx context.Context, b binaries, t route.Table, wantPlan bo
 	scfg.Binary = b.singBox
 	scfg.ClashSecret = a.currentSecret()
 	scfg.OwnProcesses = a.ownProcesses(b)
-	out, err := singbox.Generate(scfg, a.outbounds, t)
+	ob := a.outbounds
+	ob.TunnelDirect = len(ob.Tunnel) == 0 // no server in use: tunnel routes go direct, never anywhere else
+	out, err := singbox.Generate(scfg, ob, t)
 	if err != nil {
 		return r, fail(ExitConfig, "sing-box config: %w", err)
 	}
 	r.singBox = out
+	r.tunnel = !ob.TunnelDirect
 	return r, nil
 }
 
@@ -60,7 +68,12 @@ func (a *App) buildPlan(ctx context.Context, b binaries, t route.Table) (desync.
 	}
 	dcfg.ExcludeIPs = excludeIPs(dcfg.ExcludeIPs, a.outbounds.Tunnel, resolved...)
 	if len(dcfg.ExcludeIPs) == 0 {
-		return desync.Plan{}, fail(ExitConfig, "%v", errNoExclude)
+		if len(a.outbounds.Tunnel) > 0 {
+			return desync.Plan{}, fail(ExitConfig, "%v", errNoExclude)
+		}
+		// No tunnel server, so nothing to protect; the desync module wants an address, and a
+		// documentation address (RFC 5737) is never routed.
+		dcfg.ExcludeIPs = []netip.Prefix{noTunnelExclude}
 	}
 	if b.desync == "" {
 		return desync.Plan{}, fail(ExitConfig, "the desync engine binary was not found; set desync.binary or put it next to the executable")
@@ -204,15 +217,15 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 
 	t := a.d.checker.Table()
 	a.setTable(t)
-	if len(a.outbounds.Tunnel) == 0 {
-		return 0 // no tunnel server yet (UI first run): nothing to render
+	connected := a.State() == StateConnected
+	if len(a.outbounds.Tunnel) == 0 && !connected {
+		return 0 // no server in use and nothing running: the next connect renders the config
 	}
 	bins, err := a.resolveBinaries()
 	if err != nil {
 		a.log.Error("reload", "err", err)
 		return 0
 	}
-	connected := a.State() == StateConnected
 	act := a.pendingActivation() // a server activated while connected, not applied yet
 	if !connected {
 		act = nil
@@ -312,12 +325,13 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 	}
 	a.mu.Lock()
 	a.lastSBRun = a.d.clk.Now()
+	a.sbTunnel = r.tunnel
 	a.mu.Unlock()
 	if act != nil {
 		a.clearPending()
 	}
 	_ = os.Remove(backup)
-	a.log.Info("sing-box restarted with a new config")
+	a.log.Info("sing-box restarted with a new config", "tunnel", r.tunnel)
 	return 0
 }
 

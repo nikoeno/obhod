@@ -149,7 +149,7 @@ These codes are not HTTP errors: they appear in `state.error` (and the `state` e
 |---|---|---|
 | `permission_denied` | the app lacks the rights to change routing | `procman.ErrNeedsAdmin`, exit 2 without commands |
 | `needs_setup` | one-time manual setup needed; `commands` lists them (never run by the app) | Linux `inet splitter` table / `ip rule` check, exit 2 with commands |
-| `tunnel_missing` | tunnel server file missing, invalid or unresolved | secrets / resolve errors, exit 1 |
+| `tunnel_missing` | a detour server is in use but cannot be used: its host name did not resolve (and desync domains need its address) | resolve error, exit 1. **No server in use at all is not an error since 2026-11-01** (degraded mode, decision 34); a tunnel file that exists but is not valid still stops the start of `splitter` (exit 1) |
 | `crashed` | sing-box gave up while connected; the app is now disconnected | sing-box lost path |
 | `connect_failed` | any other connect failure | other errors |
 
@@ -184,10 +184,11 @@ The Rust side also produces `permission_denied` (UAC or pkexec cancelled) and `e
 
 - `error` is `null` or `{ "error": string, "code": string, "commands": [string] }` (`commands` only for `needs_setup`). It is set when a transition fails or the connection drops, and cleared when the next `connect` starts.
 - `checking` is the checker's `Status.Running`.
-- `snapshot` is `status.Snapshot` with its Go names: `Version` (string), `State` (same as `state`), `Network` (label, never the public IP; `unknown network` until identified), `LastCheck`, `NextCheck` (RFC3339; the zero time `0001-01-01T00:00:00Z` when unknown), `Routes` (`{route: domainCount}`), `Traffic` (`{route: bytes}`), `Savings` (float, 0 to 1), `Processes` (`[{Name, State, Restarts}]`), `Warnings` (`[string]`), `Recent` (`[{Domain, From, To, At}]`, the last 20 route changes). Nil slices and maps are encoded as `[]` and `{}`, never `null`. Routes are `direct | desync | tunnel | proxy | block`.
+- `snapshot` is `status.Snapshot` with its Go names: `Version` (string), `State` (same as `state`), `Network` (label, never the public IP; `unknown network` until identified), `LastCheck`, `NextCheck` (RFC3339; the zero time `0001-01-01T00:00:00Z` when unknown), `Routes` (`{route: domainCount}`), `Traffic` (`{route: bytes}`), `Savings` (float, 0 to 1), `Processes` (`[{Name, State, Restarts}]`), `Warnings` (`[string]`), `Recent` (`[{Domain, From, To, At}]`, the last 20 route changes), `Tunnel` (`"ready"` when a detour server is in use, `"none"` when there is none; added 2026-11-01, decision 34). Nil slices and maps are encoded as `[]` and `{}`, never `null`. Routes are `direct | desync | tunnel | proxy | block`.
 - `networks`: networks seen since the app started (newest last, at most 10), `label` as in `Snapshot.Network`.
+- `snapshot.Tunnel == "none"` is the degraded mode (decision 34): the app is (or would be) connected without a detour server, so every site whose route is `tunnel` is served **direct**. The UI shows its banner from this field. While connected it describes the running sing-box config: after `POST /servers/{id}/activate` it stays `"none"` until the reload has restarted sing-box with the server (up to 30 s), then becomes `"ready"`. Disconnected it says whether a server is in use.
 
-**Route** (`GET /routes`): `{ "domain", "route", "source", "since", "lastCheck", "history": [{ "From", "To", "At" }] }`, sorted by domain. `source` is `route.Source` as a string: `static` (proxy/block list), `checked`, `default`, or `user` (a per-site rule, added 2026-11-01; additive). `since` is when the entry got its current route (the first table of this run for entries that never changed). `lastCheck` is the time of the last finished check cycle (global, not per domain). `history`: at most 10 route changes of this run, oldest first. The list is empty while the table is empty ("still learning").
+**Route** (`GET /routes`): `{ "domain", "route", "source", "since", "lastCheck", "history": [{ "From", "To", "At" }], "degraded": bool }`, sorted by domain. `degraded` (added 2026-11-01) is `true` for an entry whose `route` is `tunnel` while `snapshot.Tunnel` is `"none"`: the entry keeps the route the checker or the user chose, but the site is served direct and is probably still blocked. It is `false` for every other entry. `source` is `route.Source` as a string: `static` (proxy/block list), `checked`, `default`, or `user` (a per-site rule, added 2026-11-01; additive). `since` is when the entry got its current route (the first table of this run for entries that never changed). `lastCheck` is the time of the last finished check cycle (global, not per domain). `history`: at most 10 route changes of this run, oldest first. The list is empty while the table is empty ("still learning").
 
 **Process** (`GET /processes`): `[{ "Name", "State", "Restarts" }]` for `splitter` (always `running`), `sing-box` and `desync` (the `winws2`/`nfqws2` engine). `State` is the procman state (`starting | running | stopping | stopped | failed`); a process that was never started is `stopped`.
 
@@ -359,12 +360,12 @@ All under `/api/v1/`. Bodies are JSON with the 64 KiB limit above; no response c
 
 - `test` is **offline** in v1: parse plus the same dry run, no connection to the server (decision 20; no `latencyMs`). `protocol` is filled whenever it is known, also with `ok:false`.
 - The `error` texts of `invalid_input`, `unsupported_protocol`, `duplicate` and `limit_reached` are fixed sentences from `internal/pc/servers` ("The link has no port."), never a value from the input; the gateway passes on only sentences the engine marked as safe (a `UserMessage()` method) and uses a default sentence per code otherwise. An input over 32 KiB (but a body under 64 KiB) is 413 `too_large`.
-- Activate while connected (decision 19): the new config is checked first, sing-box restarts once through the reload path (the 30 s restart gap applies: the restart waits for it, the 202 does not), and if it does not start the previous server file, outbound and active mark are put back and `state.error` becomes `connect_failed` ("The new server could not be used. The previous server is still in place."). Activate while disconnected only swaps the file; the dry run still runs.
-- Delete of the active server while disconnected is allowed: the `tunnel` file is removed and the next `connect` reports `tunnel_missing`.
+- Activate while connected (decision 19): the new config is checked first, sing-box restarts once through the reload path (the 30 s restart gap applies: the restart waits for it, the 202 does not), and if it does not start the previous server file, outbound and active mark are put back and `state.error` becomes `connect_failed` ("The new server could not be used. The previous server is still in place."; when the app was connected without a server: "...The app keeps running without a detour server."). Connected in degraded mode, this is also how the app switches to full mode: when the restart is done `snapshot.Tunnel` becomes `"ready"` and `degraded` clears. Activate while disconnected only swaps the file; the dry run still runs.
+- Delete of the active server while disconnected is allowed: the `tunnel` file is removed and the next `connect` runs in degraded mode (decision 34). Deleting the active server while connected stays 409 `busy`.
 - `AddServer`, `ActivateServer` and `DeleteServer` serialize with `Connect`, `Disconnect` and reload on the same lock (waiting honours the request context); `GET /servers` and `POST /servers/test` do not wait for it.
 - Request bodies of `POST /servers` and `POST /servers/test` are never logged. The request log line shows the path with `{id}` in place of the id (also for requests that fail authentication).
 - No new event kind: the UI refetches `GET /servers` after any server call.
-- `internal/pc` starts in UI mode without a tunnel file (a first run has none): the app is disconnected and `connect` answers `tunnel_missing` until a server is in use (decision 21).
+- `internal/pc` starts in UI mode without a tunnel file (a first run has none): the app is disconnected, and since 2026-11-01 `connect` then succeeds in degraded mode (decisions 21 and 34).
 
 ### Gateway testing
 
@@ -431,7 +432,7 @@ Approved by the human on 2026-10-31 (milestone 4 contract): every open question 
 18. **Auto-activation.** Decided: a new server is never activated automatically, not even the first one.
 19. **Activate / delete while connected.** Decided: activate reloads sing-box through the existing reload path (one restart, rollback on failure); deleting the active server while connected is 409 `busy`.
 20. **`POST /servers/test`.** Decided: offline only in v1 (parse plus the sing-box dry run); no `latencyMs`.
-21. **UI mode without a tunnel file.** Decided: `internal/pc` pre-flight no longer fails when the tunnel file is missing in UI mode; the app starts disconnected and `connect` answers `tunnel_missing`. This is an approved behaviour change of `internal/pc` (document it in `internal/pc/API.md`).
+21. **UI mode without a tunnel file.** Decided: `internal/pc` pre-flight no longer fails when the tunnel file is missing in UI mode; the app starts disconnected and `connect` answers `tunnel_missing`. This is an approved behaviour change of `internal/pc` (document it in `internal/pc/API.md`). **Superseded in part by decision 34 (2026-11-01):** `connect` no longer answers `tunnel_missing` when there is no server; it connects without a tunnel.
 22. **Limits.** Decided: 20 servers, input 32 KiB, name 60 characters.
 23. **Raw JSON hardening.** Decided: `detour` and bind keys in raw JSON are rejected.
 24. **Read-only server calls are lock-free.** Decided 2026-10-31: `GET /servers` and `POST /servers/test` do not take the Connect/Disconnect/reload lock, so a list refresh never waits behind a connect of up to 45 s. Add, activate and delete do take it.
@@ -449,6 +450,14 @@ User-approved on 2026-11-01 (Go side). Changing one later needs the human and an
 31. **Limit.** Decided: 500 rules (409 `limit_reached`); updating an existing rule at the limit works.
 32. **Status codes.** Decided: `POST /sites` answers 201 for a new rule and 200 for a changed one; `DELETE` of a name that is not a domain is 422, of a valid name without a rule 404.
 33. **Events.** Decided: reuse `routes`; none added. A source-only change has no event, so the client refetches after each call.
+
+## Degraded mode decisions
+
+User-approved on 2026-11-01 (Go side; engine decision for docs/UI.md open question 3).
+
+34. **Connect without a detour server.** Decided: when no tunnel outbound is in use (no tunnel file: first run, no server activated, or the active server deleted while disconnected), `connect` succeeds in a degraded mode (the "Everyday + Picky only" mode): sing-box runs with **no** `tunnel` outbound and its final route is `direct`; every domain whose route is `tunnel` (checker default for unknown and blocked sites, user `tunnel` rules, list entries) is sent to the `direct` outbound, never anywhere else; `block` still blocks; `desync` works as usual (the desync engine is told a documentation address, `192.0.2.1/32`, as its exclusion because there is no tunnel server to protect). The rest is unchanged: a server that is in use but unusable (host name does not resolve while desync domains exist) is still `tunnel_missing` and any other failure is still `connect_failed`.
+35. **What the API says in this mode.** Decided: additive `snapshot.Tunnel` (`"ready"` | `"none"`) and `degraded` on each tunnel-route entry of `GET /routes`. The route table is not rewritten and the checker is unchanged: it never probes through a tunnel, so a "Blocked" site keeps route `tunnel` (its source stays `checked`/`default`) and is only flagged `degraded: true`. Traffic is counted by the outbound that carried it, so these sites show up under `direct` in `snapshot.Traffic`. Alternative not taken: rewriting the route to `direct` (it would hide that the site needs a detour and would change `routes` events when a server is added).
+36. **Leaving degraded mode.** Decided: `POST /servers/{id}/activate` while connected without a server uses the existing reload path (check, one restart after the 30 s gap, rollback to the degraded config if sing-box does not start). Deleting the last/active server while connected stays 409 `busy`; disconnected it is allowed.
 
 ## Known limits (v1, fixed 2026-10-31)
 

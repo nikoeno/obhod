@@ -39,6 +39,7 @@ func sample() Snapshot {
 		Processes: []Process{{Name: "sing-box", State: "running"}, {Name: "winws2", State: "running", Restarts: 1}},
 		Warnings:  []string{"probe port blocked"},
 		Recent:    []Change{{Domain: "example.org", From: route.Tunnel, To: route.Desync, At: at}},
+		Tunnel:    TunnelReady,
 	}
 }
 

@@ -39,6 +39,8 @@ export interface StoreState {
 export interface StoreDeps {
   /** Shows a confirmation toast. */
   toast: (text: string) => void;
+  /** Milliseconds between state reads while a server switch is pending (default 2000). Tests use a small value. */
+  pollMs?: number;
 }
 
 export function newState(): StoreState {
@@ -81,6 +83,7 @@ export function createStore(backend: Backend, deps: StoreDeps) {
   function applyState(p: EngineState): void {
     const prevState = S.state;
     const prevCode = S.error?.code;
+    const prevTunnel = S.snapshot?.Tunnel;
     S.state = p.state;
     S.error = p.error ?? null;
     S.checking = !!p.checking;
@@ -92,6 +95,8 @@ export function createStore(backend: Backend, deps: StoreDeps) {
       const info = errorInfo(S.error, S.state);
       if (info) for (const fn of errorListeners) fn(info);
     }
+    // The `degraded` flags of the table follow `Tunnel` (a server was added or the first one switched on): no `routes` event says so.
+    if (S.loaded && prevTunnel !== p.snapshot?.Tunnel) void refreshRoutes();
     // There is no server event: a failed Start (tunnel_missing) or a switch may have changed the list.
     if (prevState !== S.state) void refreshServers();
   }
@@ -309,12 +314,41 @@ export function createStore(backend: Backend, deps: StoreDeps) {
   async function activateServer(id: string): Promise<Pick<Activated, 'reloaded'>> {
     const r = await guarded(backend.activateServer(id));
     await refreshServers();
+    if (r.reloaded) void watchTunnel();
+    else await refreshTunnel();
     return { reloaded: !!r.reloaded };
   }
 
   async function removeServer(id: string): Promise<void> {
     await guarded(backend.deleteServer(id));
     await refreshServers();
+    await refreshTunnel();
+  }
+
+  /** Reads the state and the table again: `Tunnel` and the `degraded` flags change with the server list. */
+  async function refreshTunnel(): Promise<void> {
+    try {
+      const [st, routes] = await Promise.all([backend.getState(), backend.getRoutes()]);
+      S.routes = routes;
+      applyState(st);
+    } catch (e) {
+      if (e instanceof BackendError && e.code === 'engine_unreachable') setEngineDown();
+    }
+  }
+
+  /**
+   * After a switch while connected the engine restarts sing-box (up to 30 s) and only then reports
+   * `Tunnel: "ready"`. Reads the state now and every `pollMs` until it flips, the app stops, or about 45 s pass.
+   */
+  async function watchTunnel(): Promise<void> {
+    const every = deps.pollMs ?? 2000;
+    const deadline = Date.now() + 45000;
+    for (;;) {
+      await refreshTunnel();
+      const switching = S.state === 'connecting' || S.state === 'connected';
+      if (S.engineDown || !switching || S.error || S.snapshot?.Tunnel !== 'none' || Date.now() > deadline || S.quit) return;
+      await new Promise((r) => setTimeout(r, every));
+    }
   }
 
   function testServer(req: TestRequest): Promise<ServerTest> {

@@ -10,7 +10,7 @@ import {
   BackendError,
   type Ack, type Activated, type Backend, type Change, type ConnState, type DevControls, type DevFlag, type EngineErrorBody,
   type EngineEvent, type EngineState, type LogName, type Logs, type ProcessInfo, type Route, type RouteInfo, type Scenario, type Server,
-  type ServerTest, type SiteAction, type SiteRule, type Snapshot, type TestRequest, type Version,
+  type ServerTest, type SiteAction, type SiteRule, type Snapshot, type TestRequest, type TunnelState, type Version,
 } from '../backend/types';
 
 export interface FakeOptions {
@@ -127,6 +127,8 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     { label: network, since: new Date(Date.now() - 40 * 60000).toISOString() },
   ];
   let routes: RouteInfo[] = [];
+  /** What the running sing-box config has (engine: `snapshot.Tunnel` while connected). Set when a connect starts and when a server switch is done. */
+  let runningTunnel: TunnelState = 'ready';
   let servers: Server[] = [];
   let sites: SiteRule[] = [];
   /** What a ruled row was before the rule (null: the rule added the row). Restored when the rule is deleted. */
@@ -155,7 +157,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
         ];
       case 'sing-box':
         return state === 'connected' || crashed
-          ? [`${stamp(6)} info  sing-box: started (fake)`, `${stamp(6)} info  outbound/tunnel: ready`, ...(crashed ? [`${stamp(1)} fatal sing-box: stopped (fake)`] : [])]
+          ? [`${stamp(6)} info  sing-box: started (fake)`, ...(runningTunnel === 'ready' ? [`${stamp(6)} info  outbound/tunnel: ready`] : [`${stamp(6)} info  no detour server: Blocked sites go direct`]), ...(crashed ? [`${stamp(1)} fatal sing-box: stopped (fake)`] : [])]
           : [];
       default:
         return state === 'connected' || crashed ? [`${stamp(6)} info  desync: started (fake)`, `${stamp(6)} info  desync: 3 profiles loaded`] : [];
@@ -230,6 +232,11 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
   }
   seed();
 
+  /** Engine contract (decisions 34 to 36): connected, it describes the running config; otherwise whether a server is in use. */
+  function tunnelNow(): TunnelState {
+    return state === 'disconnected' ? (activeServer() ? 'ready' : 'none') : runningTunnel;
+  }
+
   function emit(e: EngineEvent): void {
     for (const h of [...handlers]) h(e);
   }
@@ -260,6 +267,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
       Processes: processes(),
       Warnings: flags.warnings ? ['IPv6 is not available on this network', 'The detour server is slower than usual'] : [],
       Recent: recent.slice(-20),
+      Tunnel: tunnelNow(),
     };
   }
 
@@ -378,7 +386,8 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     },
     async getRoutes() {
       live();
-      return routes.map((r) => ({ ...r }));
+      const none = tunnelNow() === 'none';
+      return routes.map((r) => ({ ...r, degraded: none && r.route === 'tunnel' }));
     },
     async getProcesses(): Promise<ProcessInfo[]> {
       live();
@@ -397,13 +406,15 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
       if (state === 'disconnecting') throw new BackendError('busy', 'The engine is busy.');
       if (state !== 'disconnected') return { ok: true, state };
       error = null;
+      runningTunnel = activeServer() ? 'ready' : 'none';
       state = 'connecting';
       emitState();
       later(() => {
         if (state !== 'connecting') return;
         if (scenario === 'permission-denied') return fail({ error: 'Permission was not given.', code: 'permission_denied' });
         if (scenario === 'needs-setup') return fail(NEEDS_SETUP);
-        if (!activeServer()) return fail({ error: 'The detour server is not set up or cannot be reached.', code: 'tunnel_missing' });
+        // No server at all is not an error since decision 34: the app connects in degraded mode. Only a server that cannot be used fails.
+        if (scenario === 'tunnel-missing') return fail({ error: 'The detour server is not set up or cannot be reached.', code: 'tunnel_missing' });
         state = 'connected';
         emitState();
         startTraffic();
@@ -514,6 +525,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
           error = { error: 'The new server could not be used. The previous server is still in place.', code: 'connect_failed' };
         } else {
           for (const x of servers) x.active = x.id === id;
+          runningTunnel = 'ready';
           state = 'connected';
         }
         emitState();

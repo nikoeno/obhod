@@ -98,6 +98,7 @@ func TestGolden(t *testing.T) {
 		{"mixed", baseConfig(), Outbounds{Tunnel: tunnelJSON, Proxy: proxyJSON}, entries()},
 		{"proxy_unset", baseConfig(), Outbounds{Tunnel: tunnelJSON}, withoutProxy(entries())},
 		{"quic_off", noQUIC, Outbounds{Tunnel: tunnelJSON, Proxy: proxyJSON}, entries()},
+		{"tunnel_direct", baseConfig(), Outbounds{TunnelDirect: true, Proxy: proxyJSON}, entries()},
 		{"allow_other_query_types", allowOther, Outbounds{Tunnel: tunnelJSON, Proxy: proxyJSON}, entries()},
 	}
 	for _, c := range cases {
@@ -195,6 +196,60 @@ func TestDeterministic(t *testing.T) {
 	}
 }
 
+// TunnelDirect: no tunnel outbound, tunnel routes and the final route use the direct
+// outbound, block and desync keep their meaning, and the input table is not changed.
+func TestTunnelDirect(t *testing.T) {
+	tb := table(t, withoutProxy(entries()))
+	before := slices.Clone(tb.Entries)
+	out, err := Generate(baseConfig(), Outbounds{TunnelDirect: true}, tb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(before, tb.Entries) {
+		t.Error("Generate changed the caller's table")
+	}
+	var doc struct {
+		Outbounds []map[string]any `json:"outbounds"`
+		Route     struct {
+			Final string           `json:"final"`
+			Rules []map[string]any `json:"rules"`
+		} `json:"route"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range doc.Outbounds {
+		if o["tag"] == TagTunnel {
+			t.Errorf("tunnel outbound present: %v", o)
+		}
+	}
+	if doc.Route.Final != TagDirect {
+		t.Errorf("final = %q", doc.Route.Final)
+	}
+	got := map[string]string{}
+	for _, r := range doc.Route.Rules {
+		ds, _ := r["domain_suffix"].([]any)
+		for _, d := range ds {
+			if o, ok := r["outbound"].(string); ok {
+				got[d.(string)] = o
+			} else {
+				got[d.(string)] = r["action"].(string)
+			}
+		}
+	}
+	want := map[string]string{"blocked.example": "direct", "lan.example": "direct", "yt.example": "desync", "ads.example": "reject", "a.yt.example": "direct"}
+	for d, w := range want {
+		if got[d] != w {
+			t.Errorf("%s -> %q, want %q", d, got[d], w)
+		}
+	}
+	for _, r := range doc.Route.Rules {
+		if r["outbound"] == TagTunnel {
+			t.Errorf("a rule still uses the tunnel: %v", r)
+		}
+	}
+}
+
 func TestErrors(t *testing.T) {
 	tb := table(t, entries())
 	cases := []struct {
@@ -203,6 +258,7 @@ func TestErrors(t *testing.T) {
 		want error
 	}{
 		{"no tunnel", func(_ *Config, o *Outbounds, _ *route.Table) { o.Tunnel = nil }, ErrNoTunnel},
+		{"tunnel and tunnel_direct", func(_ *Config, o *Outbounds, _ *route.Table) { o.TunnelDirect = true }, ErrInvalidCfg},
 		{"proxy route without outbound", func(_ *Config, o *Outbounds, _ *route.Table) { o.Proxy = nil }, ErrNoProxy},
 		{"non-loopback api", func(c *Config, _ *Outbounds, _ *route.Table) { c.ClashAPI = "0.0.0.0:9090" }, ErrInvalidCfg},
 		{"lan api", func(c *Config, _ *Outbounds, _ *route.Table) { c.ClashAPI = "192.168.1.5:9090" }, ErrInvalidCfg},

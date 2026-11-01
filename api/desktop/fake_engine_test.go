@@ -46,7 +46,7 @@ type fakeEngine struct {
 func newFakeEngine() *fakeEngine {
 	f := &fakeEngine{
 		state: pc.StateDisconnected,
-		snap:  status.Snapshot{Version: "splitter test", Network: "unknown network"},
+		snap:  status.Snapshot{Version: "splitter test", Network: "unknown network", Tunnel: status.TunnelNone},
 		logs:  map[string][]string{},
 		subs:  map[chan pc.Event]struct{}{},
 		ready: make(chan struct{}),
@@ -270,6 +270,7 @@ func (f *fakeEngine) fillFixtures() {
 		Processes: []status.Process{{Name: "sing-box", State: "running"}, {Name: "winws2", State: "running", Restarts: 1}},
 		Warnings:  []string{"sing-box's Clash API is not answering"},
 		Recent:    []status.Change{{Domain: "video.example", From: route.Tunnel, To: route.Desync, At: t1}},
+		Tunnel:    status.TunnelReady,
 	}
 }
 

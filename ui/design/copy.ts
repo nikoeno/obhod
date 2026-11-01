@@ -104,6 +104,8 @@ export const pages = {
     cardCount: { one: '{n} site', other: '{n} sites' },
     cardTraffic: '{bytes} today',
     cardNeverOpened: 'never opened',
+    /** Muted line on the Blocked card while there is no detour server. */
+    cardNoDetour: 'No detour server yet: these sites open directly and may not load.',
     startDetails: {
       summary: 'Details',
       hint: 'What the engine reported. It stays on this computer; copy it if you ask for help.',
@@ -126,6 +128,8 @@ export const pages = {
     panel: { path: 'Path', since: 'Since', decided: 'Decided', lastCheck: 'Last check (all sites)', history: 'History', alwaysUse: 'Always use…', removeRule: 'Remove my rule', ruleNote: 'You chose this path, so the app does not check this site.' },
     sources: { checked: 'Checked on this network', static: 'From a fixed list', default: 'Safe default until checked', user: 'Set by you' },
     addSite: 'Add a site',
+    /** A Blocked site while there is no detour server (route `degraded`). */
+    noDetour: { flag: 'No detour', note: 'There is no detour server yet, so this site opens directly and may not load. Add a server in Settings → Detour server.' },
     /** The rule dialog (Add a site, Always use…). The four choices reuse `routes` (word and line). */
     rule: {
       addTitle: 'Add a site',
@@ -244,12 +248,12 @@ export const tray = {
 
 /** First run (docs/UI.md §6). Only the detour-server card on Home is built in the MVP. */
 export const firstRun = {
-  /** Home card while no server exists (built in the MVP; the Welcome and Permission screens are not). */
-  detourTitle: 'Add a detour server to start',
-  detour: 'To open blocked sites the app needs the server link from your provider.',
-  skip: 'Skip for now',
-  /** Home banner after "Skip for now". */
-  skippedBanner: 'Blocked sites stay unavailable until you add a detour server.',
+  /** Home card while no server exists and the app is off. Start works without one. */
+  detourTitle: 'Add a detour server',
+  detour: 'You can start without one. Blocked sites stay unavailable until you add the server link from your provider.',
+  /** Home card while the app is on without a server (snapshot.Tunnel is none). */
+  runningTitle: 'Running without a detour server',
+  running: 'Blocked sites stay unavailable until you add one.',
   /** A server is saved but none is active (a new server is never activated by itself). */
   pickTitle: 'Pick the server to use',
   pickText: 'A server is saved, but none is in use yet.',

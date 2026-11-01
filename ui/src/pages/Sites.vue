@@ -8,7 +8,7 @@ import { isLearning } from '../lib/errors';
 import { fmtAgo } from '../lib/format';
 import { hasRule, initialAction, ruleText, siteErrorText } from '../lib/siteRules';
 import { toast } from '../lib/toast';
-import { countLine, effectiveFilter, emptyText, filterSites, historyRows, listView, panelFacts, parseFilter, siteTabs, sourceWord, routeWord, type SiteFilter } from '../lib/sitesModel';
+import { countLine, effectiveFilter, emptyText, filterSites, historyRows, isDegraded, listView, panelFacts, parseFilter, siteTabs, sourceWord, routeWord, type SiteFilter } from '../lib/sitesModel';
 import { route } from '../router';
 import { useStore } from '../store';
 
@@ -145,7 +145,7 @@ onBeforeUnmount(() => clearInterval(tick));
               <td>
                 <button class="link plain site" type="button" :data-domain="r.domain" :aria-expanded="r.domain === selected" @click="open(r.domain)">{{ r.domain }}</button>
               </td>
-              <td><span :class="['dot', `r-${r.route}`]" aria-hidden="true"></span>{{ routeWord(r.route) }}</td>
+              <td><span :class="['dot', `r-${r.route}`]" aria-hidden="true"></span>{{ routeWord(r.route) }}<span v-if="isDegraded(r)" class="flag" :title="t.noDetour.note">{{ t.noDetour.flag }}</span></td>
               <td class="muted">{{ fmtAgo(r.since, now) }}</td>
               <td class="muted">{{ sourceWord(r.source) }}</td>
             </tr>
@@ -160,7 +160,7 @@ onBeforeUnmount(() => clearInterval(tick));
         </div>
         <dl class="facts">
           <dt>{{ t.panel.path }}</dt>
-          <dd><span :class="['dot', facts.dot]" aria-hidden="true"></span>{{ facts.long }} <code class="tech">{{ facts.engine }}</code></dd>
+          <dd><span :class="['dot', facts.dot]" aria-hidden="true"></span>{{ facts.long }} <code class="tech">{{ facts.engine }}</code><span v-if="facts.degraded" class="flag">{{ t.noDetour.flag }}</span></dd>
           <dt>{{ t.panel.since }}</dt>
           <dd>{{ facts.since }}</dd>
           <dt>{{ t.panel.decided }}</dt>
@@ -180,6 +180,7 @@ onBeforeUnmount(() => clearInterval(tick));
           <button class="btn" type="button" :disabled="S.engineDown" @click="ruleDialog = 'use'">{{ t.panel.alwaysUse }}</button>
           <button v-if="ruled" class="btn" type="button" :disabled="S.engineDown || removing" @click="removeRule">{{ t.panel.removeRule }}</button>
         </div>
+        <p v-if="facts.degraded" class="muted small">{{ t.noDetour.note }}</p>
         <p v-if="facts.byUser" class="muted small">{{ t.panel.ruleNote }}</p>
         <p class="form-msg err" role="status" aria-live="polite">{{ ruleMsg }}</p>
       </aside>

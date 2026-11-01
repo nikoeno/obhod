@@ -289,5 +289,9 @@ func (a *App) rollbackActivation(p *activation) {
 	a.pending = nil
 	a.mu.Unlock()
 	a.log.Warn("the new tunnel server could not be used; the previous one is back")
-	a.setLastError(&OpError{Code: CodeConnectFailed, Message: "The new server could not be used. The previous server is still in place."}, true)
+	msg := "The new server could not be used. The previous server is still in place."
+	if len(p.prevOutbound) == 0 {
+		msg = "The new server could not be used. The app keeps running without a detour server."
+	}
+	a.setLastError(&OpError{Code: CodeConnectFailed, Message: msg}, true)
 }

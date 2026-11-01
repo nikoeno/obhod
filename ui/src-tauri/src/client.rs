@@ -340,6 +340,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_additive_tunnel_and_degraded_fields_pass_through() {
+        let (srv, api) = setup().await;
+        let body = testdata("state_degraded.golden.json");
+        srv.reply("GET", "/api/v1/state", 200, &body);
+        let got = api.state().await.unwrap();
+        assert_eq!(got["snapshot"]["Tunnel"], "none");
+        assert_eq!(got, serde_json::from_str::<Value>(&body).unwrap());
+        // The connected-with-a-server golden says "ready" and an older engine has no field at all: both pass through unchanged.
+        srv.reply("GET", "/api/v1/state", 200, &testdata("state_connected.golden.json"));
+        assert_eq!(api.state().await.unwrap()["snapshot"]["Tunnel"], "ready");
+
+        let body = testdata("routes_degraded.golden.json");
+        srv.reply("GET", "/api/v1/routes", 200, &body);
+        let rows = api.routes().await.unwrap();
+        let flagged: Vec<&str> = rows.as_array().unwrap().iter().filter(|r| r["degraded"] == true).map(|r| r["domain"].as_str().unwrap()).collect();
+        assert_eq!(flagged, ["vpn-only.example"]);
+        assert_eq!(rows, serde_json::from_str::<Value>(&body).unwrap());
+    }
+
+    #[tokio::test]
     async fn get_endpoints_parse_their_golden_files() {
         let (srv, api) = setup().await;
         srv.reply("GET", "/api/v1/routes", 200, &testdata("routes_filled.golden.json"));

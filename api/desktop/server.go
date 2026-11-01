@@ -467,6 +467,7 @@ type routeBody struct {
 	Since     time.Time     `json:"since"`
 	LastCheck time.Time     `json:"lastCheck"`
 	History   []historyBody `json:"history"`
+	Degraded  bool          `json:"degraded"`
 }
 
 // historyBody has the Go field names, like status.Change without the domain.
@@ -594,7 +595,7 @@ func (s *server) getRoutes(w http.ResponseWriter, _ *http.Request) {
 		for _, c := range i.History {
 			hist = append(hist, historyBody{From: c.From, To: c.To, At: c.At.UTC()})
 		}
-		out = append(out, routeBody{Domain: i.Domain, Route: i.Route, Source: i.Source, Since: i.Since.UTC(), LastCheck: i.LastCheck.UTC(), History: hist})
+		out = append(out, routeBody{Domain: i.Domain, Route: i.Route, Source: i.Source, Since: i.Since.UTC(), LastCheck: i.LastCheck.UTC(), History: hist, Degraded: i.Degraded})
 	}
 	s.writeJSON(w, http.StatusOK, out)
 }

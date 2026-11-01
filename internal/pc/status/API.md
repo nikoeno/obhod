@@ -32,7 +32,10 @@ type Snapshot struct {
     Processes  []Process
     Warnings   []string
     Recent     []Change              // last route changes
+    Tunnel     string                // TunnelReady "ready" | TunnelNone "none" (added 2026-11-01): no detour server in use, routes that name the tunnel are served direct
 }
+
+const (TunnelReady = "ready"; TunnelNone = "none")
 
 type Process struct{ Name, State string; Restarts int }
 type Change struct{ Domain string; From, To route.Route; At time.Time }

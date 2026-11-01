@@ -11,7 +11,8 @@ const open = ref(false);
 
 const SCENARIOS: Array<[Scenario, string]> = [
   ['normal', 'Normal'],
-  ['no-server', 'No detour server (list is empty, Start fails)'],
+  ['no-server', 'No detour server (list is empty, Start works without it)'],
+  ['tunnel-missing', 'Detour server cannot be used (Start fails)'],
   ['permission-denied', 'Permission denied on Start'],
   ['needs-setup', 'Linux: one-time setup needed'],
   ['crash', 'Connection drops after a few seconds'],

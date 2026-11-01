@@ -531,6 +531,19 @@ func TestStreamLimit(t *testing.T) {
 
 // ---- GET payloads ----
 
+// Without a detour server the snapshot says so and tunnel routes are flagged.
+func TestDegradedGoldens(t *testing.T) {
+	e := newEnv(t)
+	e.eng.fillFixtures()
+	e.eng.mu.Lock()
+	e.eng.snap.Tunnel = status.TunnelNone
+	e.eng.routes[2].Degraded = true
+	e.eng.mu.Unlock()
+	e.eng.setState(pc.StateConnected)
+	golden(t, "state_degraded", e.get("/api/v1/state").body)
+	golden(t, "routes_degraded", e.get("/api/v1/routes").body)
+}
+
 func TestGetGoldens(t *testing.T) {
 	e := newEnv(t)
 

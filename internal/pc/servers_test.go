@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/nikoejento/obhod/internal/lib/route"
 	"github.com/nikoejento/obhod/internal/pc/servers"
 	"github.com/nikoejento/obhod/internal/pc/singbox"
+	"github.com/nikoejento/obhod/internal/pc/status"
 )
 
 // noTunnelOutbounds makes pre-flight read the secrets directory again (the
@@ -53,24 +55,164 @@ func TestUIStartsWithoutTunnelFile(t *testing.T) {
 	if got := h.app.State(); got != StateDisconnected {
 		t.Fatalf("state = %s", got)
 	}
-	err := h.app.Connect(context.Background())
-	if err == nil {
-		t.Fatal("Connect succeeded without a tunnel file")
+	if got := h.app.Snapshot().Tunnel; got != status.TunnelNone {
+		t.Fatalf("Snapshot.Tunnel = %q while disconnected with no server", got)
 	}
-	if le := h.app.LastError(); le == nil || le.Code != CodeTunnelMissing {
-		t.Fatalf("LastError = %+v, want tunnel_missing", le)
-	}
-	if h.procs.started[nameSingBox] {
-		t.Error("sing-box was started without a tunnel")
-	}
-	if h.app.State() != StateDisconnected {
-		t.Errorf("state after the failed connect = %s", h.app.State())
-	}
-	// A table change while there is no tunnel is applied quietly.
+	// A table change while disconnected with no server is applied quietly.
 	h.chk.publish(tbl(t, ent("a.example", route.Tunnel)))
 	waitUntil(t, "debounce timer", func() bool { return h.fc.Waiters() >= 1 })
 	h.fc.Advance(reloadDebounce)
 	waitUntil(t, "table applied", func() bool { return len(h.app.currentTable().Entries) == 1 })
+	if h.procs.started[nameSingBox] {
+		t.Error("sing-box was started while disconnected")
+	}
+}
+
+// Connect with no server in use runs in degraded mode: no tunnel outbound,
+// tunnel-route domains direct, block still blocks, desync still runs.
+func TestConnectWithoutServerIsDegraded(t *testing.T) {
+	tab := tbl(t, ent("yt.example", route.Desync), ent("blocked.example", route.Tunnel),
+		ent("plain.example", route.Direct), ent("bad.example", route.Block))
+	h := newHarness(t, tab, WithUI(true), noTunnelOutbounds)
+	h.start()
+	h.waitRunning()
+	if err := h.app.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect without a server: %v", err)
+	}
+	if h.app.State() != StateConnected || h.app.LastError() != nil {
+		t.Fatalf("state %s, error %+v", h.app.State(), h.app.LastError())
+	}
+	var doc struct {
+		Outbounds []map[string]any `json:"outbounds"`
+		Route     struct {
+			Final string           `json:"final"`
+			Rules []map[string]any `json:"rules"`
+		} `json:"route"`
+	}
+	if err := json.Unmarshal(h.singBoxFile(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range doc.Outbounds {
+		if o["tag"] == "tunnel" {
+			t.Fatalf("degraded config has a tunnel outbound: %v", o)
+		}
+	}
+	if doc.Route.Final != "direct" {
+		t.Errorf("final = %q", doc.Route.Final)
+	}
+	outbound := map[string]string{}
+	for _, r := range doc.Route.Rules {
+		ds, _ := r["domain_suffix"].([]any)
+		for _, d := range ds {
+			if o, ok := r["outbound"].(string); ok {
+				outbound[d.(string)] = o
+			} else {
+				outbound[d.(string)] = fmt.Sprint(r["action"])
+			}
+		}
+	}
+	want := map[string]string{"blocked.example": "direct", "plain.example": "direct", "yt.example": "desync", "bad.example": "reject"}
+	for d, w := range want {
+		if outbound[d] != w {
+			t.Errorf("%s -> %q, want %q", d, outbound[d], w)
+		}
+	}
+	if _, ok := h.procs.spec(string(h.cfg.Desync.Engine)); !ok {
+		t.Error("the desync engine did not start in degraded mode")
+	}
+	if !h.procs.started[nameSingBox] {
+		t.Error("sing-box did not start")
+	}
+	// The status says so; the tunnel-route entry is flagged, the others are not.
+	if got := h.app.Snapshot().Tunnel; got != status.TunnelNone {
+		t.Errorf("Snapshot.Tunnel = %q", got)
+	}
+	for _, r := range h.app.Routes() {
+		if r.Degraded != (r.Route == route.Tunnel) {
+			t.Errorf("%s (%s): Degraded = %v", r.Domain, r.Route, r.Degraded)
+		}
+	}
+}
+
+// A stored server that is not in use (never activated) leaves the same degraded mode.
+func TestConnectWithStoredButInactiveServerIsDegraded(t *testing.T) {
+	h := newHarness(t, baseTable(t), WithUI(true), noTunnelOutbounds)
+	h.start()
+	h.waitRunning()
+	h.addServer(1)
+	if err := h.app.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.app.Snapshot().Tunnel != status.TunnelNone {
+		t.Error("an inactive server counts as a tunnel")
+	}
+}
+
+// Activating a server while connected without one switches to full mode through
+// the normal reload path; a failed start rolls back to degraded mode.
+func TestActivateWhileDegradedSwitchesToFullMode(t *testing.T) {
+	h := newHarness(t, baseTable(t), WithUI(true), noTunnelOutbounds)
+	h.start()
+	h.waitRunning()
+	ctx := context.Background()
+	s := h.addServer(1)
+	if err := h.app.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(h.singBoxFile()), "192.0.2.1") {
+		t.Fatal("degraded config names the server")
+	}
+	if reloaded, err := h.app.ActivateServer(ctx, s.ID); err != nil || !reloaded {
+		t.Fatalf("ActivateServer = %v, %v", reloaded, err)
+	}
+	waitUntil(t, "retry timer", func() bool { return h.fc.Waiters() >= 1 })
+	if got := h.app.Snapshot().Tunnel; got != status.TunnelNone {
+		t.Errorf("Snapshot.Tunnel = %q while the restart waits for the gap", got)
+	}
+	h.fc.Advance(singBoxMinGap)
+	waitUntil(t, "pending cleared", func() bool { return h.app.pendingActivation() == nil })
+	cfg := string(h.singBoxFile())
+	if !strings.Contains(cfg, "192.0.2.1") || !strings.Contains(cfg, `"final": "tunnel"`) {
+		t.Fatalf("full config not applied:\n%s", cfg)
+	}
+	if got := h.app.Snapshot().Tunnel; got != status.TunnelReady {
+		t.Errorf("Snapshot.Tunnel = %q after the switch", got)
+	}
+	for _, r := range h.app.Routes() {
+		if r.Degraded {
+			t.Errorf("%s still flagged", r.Domain)
+		}
+	}
+}
+
+func TestActivateWhileDegradedRollsBackToDegraded(t *testing.T) {
+	h := newHarness(t, baseTable(t), WithUI(true), noTunnelOutbounds)
+	h.start()
+	h.waitRunning()
+	ctx := context.Background()
+	s := h.addServer(1)
+	if err := h.app.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.procs.restartErr[nameSingBox] = []error{errors.New("start failed"), nil}
+	if _, err := h.app.ActivateServer(ctx, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "retry timer", func() bool { return h.fc.Waiters() >= 1 })
+	h.fc.Advance(singBoxMinGap)
+	waitUntil(t, "rollback", func() bool { return h.app.LastError() != nil })
+	if h.app.State() != StateConnected || h.app.Snapshot().Tunnel != status.TunnelNone {
+		t.Errorf("state %s, tunnel %q", h.app.State(), h.app.Snapshot().Tunnel)
+	}
+	if _, err := os.Stat(h.tunnelFile()); err == nil {
+		t.Error("the tunnel file of the failed activation is still there")
+	}
+	if h.app.serverStoreActive() != "" {
+		t.Errorf("active = %q", h.app.serverStoreActive())
+	}
+	if strings.Contains(string(h.singBoxFile()), "192.0.2.1") {
+		t.Error("sing-box config is not the degraded one")
+	}
 }
 
 func TestTerminalModeStillNeedsTunnelFile(t *testing.T) {
@@ -210,11 +352,12 @@ func TestDeleteRules(t *testing.T) {
 	if list, _ := h.app.Servers(); len(list) != 0 {
 		t.Errorf("servers left: %+v", list)
 	}
-	if err := h.app.Connect(ctx); err == nil {
-		t.Fatal("Connect succeeded with no tunnel")
+	// With no server left, Connect runs without a tunnel.
+	if err := h.app.Connect(ctx); err != nil {
+		t.Fatalf("Connect with no server: %v", err)
 	}
-	if le := h.app.LastError(); le == nil || le.Code != CodeTunnelMissing {
-		t.Fatalf("LastError = %+v, want tunnel_missing", le)
+	if h.app.Snapshot().Tunnel != status.TunnelNone {
+		t.Error("Snapshot.Tunnel is not none")
 	}
 }
 

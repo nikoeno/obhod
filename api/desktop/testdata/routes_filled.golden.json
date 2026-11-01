@@ -5,7 +5,8 @@
     "source": "checked",
     "since": "2026-10-31T12:00:00Z",
     "lastCheck": "2026-10-31T12:05:00Z",
-    "history": []
+    "history": [],
+    "degraded": false
   },
   {
     "domain": "video.example",
@@ -19,7 +20,8 @@
         "To": "desync",
         "At": "2026-10-31T12:05:00Z"
       }
-    ]
+    ],
+    "degraded": false
   },
   {
     "domain": "vpn-only.example",
@@ -27,6 +29,7 @@
     "source": "static",
     "since": "2026-10-31T12:00:00Z",
     "lastCheck": "2026-10-31T12:05:00Z",
-    "history": []
+    "history": [],
+    "degraded": false
   }
 ]

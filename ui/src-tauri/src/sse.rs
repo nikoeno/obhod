@@ -342,6 +342,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_degraded_state_event_keeps_the_additive_tunnel_field() {
+        let srv = FakeServer::start(TOKEN).await;
+        let golden: serde_json::Value = serde_json::from_str(&crate::testutil::testdata("state_degraded.golden.json")).unwrap();
+        let chunk = format!("id: 1
+event: state
+data: {}
+
+", serde_json::to_string(&golden).unwrap());
+        srv.script_events(vec![chunk.as_str(), "id: 2
+event: shutdown
+data: {}
+
+"], After::Hold);
+        let sink = Arc::new(Collect::default());
+        let (_tx, rx) = watch::channel(false);
+        run_event_loop(Client::new(srv.addr, TOKEN).unwrap(), sink.clone(), rx, fast()).await;
+        let got = sink.0.lock().unwrap()[1].data.clone();
+        assert_eq!(got, golden);
+        assert_eq!(got["snapshot"]["Tunnel"], "none");
+    }
+
+    #[tokio::test]
     async fn reconnects_after_the_stream_breaks_and_resyncs_with_a_new_state() {
         let srv = FakeServer::start(TOKEN).await;
         srv.script_events(vec!["event: state\ndata: {\"state\":\"connecting\"}\n\n"], After::Close);

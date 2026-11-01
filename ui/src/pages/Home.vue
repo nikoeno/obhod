@@ -1,15 +1,14 @@
 <script setup lang="ts">
 // Home: the one-button screen (docs/UI.md 4, 5.1, 6).
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { actions, extraRoutes, firstRun, mainRoutes, pages, routes as routeCopy } from '../../design/copy';
+import { actions, extraRoutes, mainRoutes, pages, routes as routeCopy } from '../../design/copy';
 import type { Route } from '../backend/types';
 import Icon from '../components/Icon.vue';
 import { errorInfo, isLearning } from '../lib/errors';
 import { fmtAgo, fmtBytes, fill, pct, plural } from '../lib/format';
 import { copyText } from '../lib/clipboard';
-import { buttonModel, setupCard, startDetails, subAction } from '../lib/homeModel';
+import { blockedCaveat, buttonModel, detourNotice, detourNoticeText, noDetour, startDetails, subAction } from '../lib/homeModel';
 import { fanPaths } from '../lib/icons';
-import { loadSetting, saveSetting } from '../lib/settings';
 import { serverText, serverErrorText } from '../lib/serverText';
 import { toast } from '../lib/toast';
 import { go } from '../router';
@@ -36,8 +35,11 @@ async function copyDetails(): Promise<void> {
   toast((await copyText(details.value)) ? pages.home.startDetails.copied : pages.home.startDetails.copyFailed);
 }
 
-const skipped = ref(loadSetting('detourSkipped', false));
-const card = computed(() => setupCard({ engineDown: S.engineDown, serversLoaded: S.serversLoaded, servers: S.servers, skipped: skipped.value }));
+// Start never waits for a detour server; this card only invites the user to add or pick one.
+const notice = computed(() => detourNotice({ engineDown: S.engineDown, serversLoaded: S.serversLoaded, servers: S.servers }));
+const running = computed(() => S.state === 'connected' && noDetour(S.snapshot));
+const noticeText = computed(() => detourNoticeText(notice.value, running.value));
+const blockedLine = computed(() => blockedCaveat(S.engineDown, S.snapshot));
 const onlyServer = computed(() => (S.servers.length === 1 ? S.servers[0]! : null));
 
 const warnings = computed(() => (S.engineDown ? [] : (S.snapshot?.Warnings ?? [])));
@@ -67,11 +69,6 @@ function cardTraffic(r: Route): string {
   return r === 'block' ? pages.home.cardNeverOpened : fill(pages.home.cardTraffic, { bytes: fmtBytes(store.routeTraffic(r)) });
 }
 
-function skip(): void {
-  skipped.value = true;
-  saveSetting('detourSkipped', true);
-}
-
 async function useServer(id: string, name: string): Promise<void> {
   try {
     const r = await store.activateServer(id);
@@ -98,27 +95,17 @@ async function useServer(id: string, name: string): Promise<void> {
     </div>
 
     <div class="setup-slot">
-      <section v-if="card === 'pick'" class="setup-card" aria-labelledby="setup-h">
-        <h2 id="setup-h">{{ firstRun.pickTitle }}</h2>
-        <p class="muted">{{ firstRun.pickText }}</p>
+      <section v-if="noticeText" class="setup-card" aria-labelledby="setup-h">
+        <h2 id="setup-h">{{ noticeText.title }}</h2>
+        <p class="muted">{{ noticeText.text }}</p>
         <div class="row gap wrap">
-          <button v-if="onlyServer" class="btn primary" type="button" @click="useServer(onlyServer.id, onlyServer.name)">{{ actions.makeActive }}: {{ onlyServer.name }}</button>
-          <button v-else class="btn primary" type="button" @click="go('settings', { tab: 'detour' })">Choose in Settings</button>
+          <template v-if="notice === 'pick'">
+            <button v-if="onlyServer" class="btn primary" type="button" @click="useServer(onlyServer.id, onlyServer.name)">{{ actions.makeActive }}: {{ onlyServer.name }}</button>
+            <button v-else class="btn primary" type="button" @click="go('settings', { tab: 'detour' })">Choose in Settings</button>
+          </template>
+          <button v-else class="btn primary" type="button" @click="showAddServerDialog()">{{ actions.addServer }}</button>
         </div>
       </section>
-      <section v-else-if="card === 'add'" class="setup-card" aria-labelledby="setup-h">
-        <h2 id="setup-h">{{ firstRun.detourTitle }}</h2>
-        <p class="muted">{{ firstRun.detour }}</p>
-        <div class="row gap wrap">
-          <button class="btn primary" type="button" @click="showAddServerDialog()">{{ actions.addServer }}</button>
-          <button class="btn" type="button" @click="skip">{{ firstRun.skip }}</button>
-        </div>
-      </section>
-      <div v-else-if="card === 'skipped'" class="banner" role="status">
-        <span class="banner-icon" aria-hidden="true">!</span>
-        <span class="grow">{{ firstRun.skippedBanner }}</span>
-        <button class="link" type="button" @click="go('settings', { tab: 'detour' })">{{ actions.addServer }}</button>
-      </div>
     </div>
 
     <div class="hero">
@@ -146,9 +133,10 @@ async function useServer(id: string, name: string): Promise<void> {
         <path v-for="d in fanPaths" :key="d" :d="d" fill="none" vector-effect="non-scaling-stroke" />
       </svg>
       <div class="cards">
-        <button v-for="r in mainRoutes" :key="r" class="card path" type="button" :aria-label="`${routeCopy[r].long}: ${cardCount(r)}, ${cardTraffic(r)}. Show in Sites`" @click="go('sites', { route: r })">
+        <button v-for="r in mainRoutes" :key="r" class="card path" type="button" :aria-label="`${routeCopy[r].long}: ${cardCount(r)}, ${cardTraffic(r)}${r === 'tunnel' && blockedLine ? `. ${blockedLine}` : ''}. Show in Sites`" @click="go('sites', { route: r })">
           <span class="card-head"><span :class="['dot', `r-${r}`]" aria-hidden="true"></span><span class="card-title">{{ routeCopy[r].long }}</span></span>
           <span class="card-line muted">{{ routeCopy[r].line }}</span>
+          <span v-if="r === 'tunnel' && blockedLine" class="card-line muted card-caveat">{{ blockedLine }}</span>
           <span class="card-nums"><strong>{{ cardCount(r) }}</strong><span class="muted">{{ cardTraffic(r) }}</span></span>
         </button>
       </div>

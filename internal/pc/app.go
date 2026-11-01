@@ -150,6 +150,7 @@ type App struct {
 	monDone    chan struct{}
 	dialClash  clashapi.Client
 	binaries   binaries
+	sbTunnel   bool // the running sing-box config has a tunnel outbound (false: degraded, tunnel routes go direct)
 
 	release     func()        // releases the single-instance lock
 	onFatal     func(error)   // ends Run with an error
@@ -416,8 +417,8 @@ func (a *App) preflight(ctx context.Context) error {
 			return fail(ExitConfig, "%v", err)
 		}
 		if len(ob.Tunnel) == 0 {
-			// UI mode, first run: no server added yet. Start disconnected;
-			// Connect answers tunnel_missing until a server is activated.
+			// UI mode, first run: no server in use yet. Start disconnected;
+			// Connect then runs without a tunnel (degraded mode) until a server is activated.
 			a.log.Info("no tunnel server file yet; starting disconnected")
 		}
 		a.outbounds, a.haveOutbounds = ob, true
@@ -575,9 +576,6 @@ func (a *App) disconnectLocked(ctx context.Context) error {
 // connectLocked is steps 3-5 of the startup order: the desync engine first (it
 // must be up before the TUN), then sing-box, then the monitor.
 func (a *App) connectLocked(ctx context.Context) error {
-	if len(a.outbounds.Tunnel) == 0 {
-		return fail(ExitConfig, "%w", singbox.ErrNoTunnel)
-	}
 	table := a.currentTable()
 	bins, err := a.resolveBinaries()
 	if err != nil {
@@ -624,7 +622,11 @@ func (a *App) connectLocked(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	a.lastSBRun = a.d.clk.Now()
+	a.sbTunnel = r.tunnel
 	a.mu.Unlock()
+	if !r.tunnel {
+		a.log.Warn("no detour server in use: connected without a tunnel; routes that need it go direct")
+	}
 
 	a.startMonitor()
 	return nil
@@ -884,6 +886,26 @@ func (a *App) resolveTunnel(ctx context.Context) {
 	a.mu.Lock()
 	a.tunnelAddrs = addrs
 	a.mu.Unlock()
+}
+
+// tunnelStatus returns status.TunnelReady or status.TunnelNone. While connected it
+// describes the running sing-box config (a server activated during the 30 s gap
+// is not in it yet); otherwise whether a server is in use.
+func (a *App) tunnelStatus() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.tunnelStatusLocked()
+}
+
+func (a *App) tunnelStatusLocked() string {
+	have := len(a.outbounds.Tunnel) > 0
+	if a.state == StateConnected {
+		have = a.sbTunnel
+	}
+	if have {
+		return status.TunnelReady
+	}
+	return status.TunnelNone
 }
 
 // resolveBinaries finds sing-box and, when needed, the desync engine.

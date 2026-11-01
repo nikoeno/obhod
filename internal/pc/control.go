@@ -36,6 +36,9 @@ type RouteInfo struct {
 	Since     time.Time       // when the entry got its current route (the first table of this run for entries that never changed)
 	LastCheck time.Time       // the last finished check cycle; global, not per domain
 	History   []status.Change // route changes of this run, at most 10, oldest first
+	// Degraded: the route is tunnel but no detour server is in use (Snapshot.Tunnel is "none"),
+	// so the site is served direct and probably still blocked.
+	Degraded bool
 }
 
 // Routes returns the current table sorted by domain. It is empty while the
@@ -44,12 +47,14 @@ func (a *App) Routes() []RouteInfo {
 	last := a.d.checker.Status().LastCheck
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	noTunnel := a.tunnelStatusLocked() == status.TunnelNone
 	out := make([]RouteInfo, 0, len(a.table.Entries))
 	for _, e := range a.table.Entries {
 		out = append(out, RouteInfo{
 			Domain: e.Domain, Route: e.Route, Source: e.Source,
 			Since: a.since[e.Domain], LastCheck: last,
-			History: append([]status.Change(nil), a.history[e.Domain]...),
+			History:  append([]status.Change(nil), a.history[e.Domain]...),
+			Degraded: noTunnel && e.Route == route.Tunnel,
 		})
 	}
 	return out

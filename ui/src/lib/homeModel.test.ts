@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Server } from '../backend/types';
-import { buttonModel, setupCard, startDetails, subAction, type HomeInput } from './homeModel';
+import { blockedCaveat, buttonModel, detourNotice, detourNoticeText, noDetour, startDetails, subAction, type HomeInput } from './homeModel';
 
 const base: HomeInput = { engineDown: false, startError: null, state: 'disconnected', error: null, snapshot: { Savings: 0.78 } };
 const srv = (o: Partial<Server> = {}): Server => ({ id: '0000000000000001', name: 'S', protocol: 'vless', engine: 'singbox', host: 'h', port: 1, active: false, addedAt: '', ...o });
@@ -54,17 +54,57 @@ describe('subAction', () => {
   });
 });
 
-describe('setupCard (first run)', () => {
-  const o = { engineDown: false, serversLoaded: true, servers: [] as Server[], skipped: false };
-  it('asks to add a server, then to pick one, then goes away', () => {
-    expect(setupCard(o)).toBe('add');
-    expect(setupCard({ ...o, skipped: true })).toBe('skipped');
-    expect(setupCard({ ...o, servers: [srv()] })).toBe('pick');
-    expect(setupCard({ ...o, servers: [srv({ active: true })] })).toBe('none');
+describe('Start without a detour server', () => {
+  it('the button is enabled and says Start whether or not a server exists (the notice never blocks it)', () => {
+    expect(buttonModel({ ...base, snapshot: { Savings: 0, Tunnel: 'none' } })).toMatchObject({ look: 'idle', label: 'Start', disabled: false, err: null });
+    expect(buttonModel({ ...base, state: 'connected', snapshot: { Savings: 0, Tunnel: 'none' } })).toMatchObject({ look: 'on', label: 'Stop', disabled: false });
+  });
+  it('tunnel_missing (a server that cannot be used) keeps its message and its Open Detour server action', () => {
+    const m = buttonModel({ ...base, error: { code: 'tunnel_missing', error: 'x' } });
+    expect(m.sub).toBe('The detour server is not set up or cannot be reached.');
+    expect(subAction(m, false, null)).toBe('detour');
+  });
+});
+
+describe('detourNotice', () => {
+  const o = { engineDown: false, serversLoaded: true, servers: [] as Server[] };
+  it('invites to add a server, then to pick one, then goes away once one is in use', () => {
+    expect(detourNotice(o)).toBe('add');
+    expect(detourNotice({ ...o, servers: [srv()] })).toBe('pick');
+    expect(detourNotice({ ...o, servers: [srv({ active: true })] })).toBe('none');
   });
   it('shows nothing while loading or without an engine', () => {
-    expect(setupCard({ ...o, serversLoaded: false })).toBe('none');
-    expect(setupCard({ ...o, engineDown: true })).toBe('none');
+    expect(detourNotice({ ...o, serversLoaded: false })).toBe('none');
+    expect(detourNotice({ ...o, engineDown: true })).toBe('none');
+  });
+  it('words: calm invitation while off, "Running without a detour server" while on', () => {
+    expect(detourNoticeText('none', false)).toBeNull();
+    expect(detourNoticeText('add', false)).toMatchObject({ title: 'Add a detour server' });
+    expect(detourNoticeText('add', true)).toEqual({ title: 'Running without a detour server', text: 'Blocked sites stay unavailable until you add one.' });
+    expect(detourNoticeText('pick', false)).toMatchObject({ title: 'Pick the server to use' });
+    expect(detourNoticeText('pick', true)?.title).toBe('Running without a detour server');
+  });
+  it('uses no network words', () => {
+    for (const k of ['add', 'pick'] as const) {
+      for (const run of [false, true]) {
+        const t = detourNoticeText(k, run)!;
+        expect(`${t.title} ${t.text}`).not.toMatch(/tunnel|proxy|sing-?box|vpn|dns/i);
+      }
+    }
+  });
+});
+
+describe('Tunnel none', () => {
+  it('noDetour reads only "none"; an older engine without the field counts as ready', () => {
+    expect(noDetour({ Tunnel: 'none' })).toBe(true);
+    expect(noDetour({ Tunnel: 'ready' })).toBe(false);
+    expect(noDetour({})).toBe(false);
+    expect(noDetour(null)).toBe(false);
+  });
+  it('the Blocked card gets a muted caveat only then', () => {
+    expect(blockedCaveat(false, { Tunnel: 'none' })).toMatch(/No detour server yet/);
+    expect(blockedCaveat(false, { Tunnel: 'ready' })).toBe('');
+    expect(blockedCaveat(true, { Tunnel: 'none' })).toBe('');
   });
 });
 

@@ -22,7 +22,15 @@ export interface Snapshot {
   Processes: ProcessInfo[];
   Warnings: string[];
   Recent: Change[];
+  /**
+   * `ready` when a detour server is in use, `none` when there is none (degraded mode: sites on the
+   * Blocked path are served directly). Added by the engine 2026-11-01 (decision 34); absent from an
+   * older engine, which the UI reads as `ready`.
+   */
+  Tunnel?: TunnelState;
 }
+
+export type TunnelState = 'ready' | 'none';
 
 /** `state.error` as the engine sends it. */
 export interface EngineErrorBody { error: string; code: string; commands?: string[] }
@@ -44,6 +52,8 @@ export interface RouteInfo {
   since: string;
   lastCheck: string;
   history: Change[];
+  /** True for a Blocked-path site while there is no detour server: it is served directly. Absent from an older engine. */
+  degraded?: boolean;
 }
 
 export interface Version { splitter: string; singBox: string; desync: string; api: string }
@@ -107,7 +117,7 @@ export class BackendError extends Error {
 }
 
 /** Scenarios of the dev-only fake backend. */
-export type Scenario = 'normal' | 'no-server' | 'permission-denied' | 'needs-setup' | 'crash' | 'engine-unreachable';
+export type Scenario = 'normal' | 'no-server' | 'tunnel-missing' | 'permission-denied' | 'needs-setup' | 'crash' | 'engine-unreachable';
 export type DevFlag = 'warnings' | 'extras' | 'learning' | 'reloadFails';
 
 /** Dev-only controls; only the fake backend provides them. */
