@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/nikoejento/obhod/internal/lib/checker"
@@ -121,14 +122,16 @@ func (s *statusSource) Snapshot() status.Snapshot {
 	return snap
 }
 
-// networkLabel names the network for the status page: the AS name, else AS<number>, else a placeholder.
-// It never contains the public IP.
+// networkLabel names the network for the status page: the AS name, else AS<number>, "This connection" for a
+// local ID (adapter and gateway only, no ISP known), else a placeholder. It never contains an address.
 func networkLabel(n checker.Network) string {
 	switch {
 	case n.ASName != "":
 		return n.ASName
 	case n.ASN != 0:
 		return "AS" + strconv.FormatUint(uint64(n.ASN), 10)
+	case strings.HasPrefix(n.ID, "local:"):
+		return "This connection"
 	}
 	return "unknown network"
 }

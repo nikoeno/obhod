@@ -20,6 +20,7 @@ func TestNetworkIDValid(t *testing.T) {
 		"asn:12389":           true,
 		"gw:3f9a0000deadbeef": true,
 		"asn:12389/gw:3f9a":   true,
+		"local:3f9a0000dead":  true,
 		"":                    false,
 		"12389":               false,
 		"asn:12 389":          false,

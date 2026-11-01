@@ -104,6 +104,8 @@ Files: `netwatch.go`, `identify.go`, `echo.go` (default public-IP lookup), tests
 - `Changes()` is buffered 1, latest-wins, and emits only when `ID` or `Known` changes. `Current()` is guarded by a mutex.
 - `PublicIP` never leaves memory and is never logged.
 
+- Update 2026-11-01: after `gw:`, a last-resort `local:<hash(salt|uplink name|gateway IP)>` (offline; per adapter + gateway, not per ISP) so Windows without echo endpoints still gets a `Known` network and is probed.
+
 Tests: fakes for all four deps; ASN path; ASN failure → gw fallback; `IncludeGateway`; debounce (5 events in 1 s → 1 identify); same ID → no event; the same salt gives the same ID and a different salt a different one; identify fails with an unchanged uplink → last ID kept.
 
 ### M7 — checker root
@@ -177,3 +179,12 @@ In `lab/`, with `fakedpi` + `fakeasn` once they exist: a checker with a real Run
 9. **`checker.ListsConfig` re-exports** (M7): API.md types `Config` fields as `lists.Config` etc. but also says apps use `checker.ListsConfig`. Proposal: type aliases in the root, and the struct fields use the aliases.
 10. **NextCheck in Status** (M5/M7): the scheduler exposes no "next due" time. Proposal: `func (s *Scheduler) Next() time.Time` (an API change).
 11. **Failures on a domain with a pending switch** (M2): should a live failure count as an extra confirmation? Proposal: no; it only triggers a recheck, and the probe decides.
+
+## 4. Planned: optional ISP-based network ID (option 3, decided 2026-11-01)
+
+The default network ID on Windows is the offline `local:` fallback (see DESIGN.md). Planned follow-up, not built yet:
+
+- Document and expose the public-IP lookup in the default `app.yaml`: `checker.netwatch.echoendpoints` already exists and is empty by default (no hardcoded server). A commented example and a note on its privacy cost (the chosen service sees the public IP on every refresh) go into the generated config; later a Settings switch in the UI.
+- When the list is non-empty and a lookup succeeds, the ID becomes `asn:<n>` and replaces `local:`. Decisions stored under the old `local:` ID do not carry over, so the first check after switching re-probes every candidate once. The UI should say so when the setting is turned on.
+- If the lookup fails or the service is blocked, the chain falls back to `gw:` and then `local:` as today, so checks keep running.
+- Open: whether to migrate old decisions from `local:` to `asn:` (proposal: no, a re-check is cheap), and which services to suggest in docs (none are built in).

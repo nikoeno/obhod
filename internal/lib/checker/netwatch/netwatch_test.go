@@ -195,7 +195,7 @@ func TestIncludeGateway(t *testing.T) {
 
 func TestNothingAvailableIsUnknown(t *testing.T) {
 	e := newEnv()
-	e.set(func(e *env) { e.ipErr = errors.New("x"); e.ifc.GatewayMAC = nil })
+	e.set(func(e *env) { e.ipErr = errors.New("x"); e.ifc.GatewayMAC = nil; e.ifc.Gateway = netip.Addr{} })
 	r := start(t, Config{Salt: "s"}, e)
 	r.call(t)
 	r.noChange(t) // never known: nothing to announce
@@ -339,6 +339,121 @@ func TestEchoLookupWithoutEndpoints(t *testing.T) {
 	f := echoLookup(nil, func(context.Context) (netif.Interface, error) { return netif.Interface{}, nil })
 	if _, err := f(context.Background()); err == nil {
 		t.Error("want error without endpoints")
+	}
+}
+
+// winEnv mimics Windows: an uplink with a name and a gateway IP, but no gateway MAC and no SSID, and no
+// public-IP lookup.
+func winEnv() *env {
+	e := newEnv()
+	e.set(func(e *env) {
+		e.ipErr = errors.New("no echo endpoints")
+		e.ifc = netif.Interface{Name: "Ethernet", Index: 7, Gateway: netip.MustParseAddr("192.168.1.1")}
+	})
+	return e
+}
+
+func TestLocalFallback(t *testing.T) {
+	r := start(t, Config{Salt: "s"}, winEnv())
+	n := r.change(t)
+	if !n.Known || !strings.HasPrefix(string(n.ID), "local:") || len(n.ID) != len("local:")+16 || n.ASN != 0 || !n.ID.Valid() {
+		t.Fatalf("network = %+v", n)
+	}
+	for _, leak := range []string{"192.168", "192", "Ethernet"} {
+		if strings.Contains(string(n.ID), leak) {
+			t.Errorf("ID %q contains %q", n.ID, leak)
+		}
+	}
+}
+
+func TestLocalFallbackIsLastResort(t *testing.T) {
+	// A gateway MAC present: gw: wins over local:.
+	e := winEnv()
+	e.set(func(e *env) { e.ifc.GatewayMAC = net.HardwareAddr{2, 0, 0, 0, 0, 1} })
+	if n := start(t, Config{Salt: "s"}, e).change(t); !strings.HasPrefix(string(n.ID), "gw:") {
+		t.Errorf("with a MAC: %q", n.ID)
+	}
+	// An SSID present: gw: too.
+	e = winEnv()
+	e.set(func(e *env) { e.ifc.SSID = "home" })
+	if n := start(t, Config{Salt: "s"}, e).change(t); !strings.HasPrefix(string(n.ID), "gw:") {
+		t.Errorf("with an SSID: %q", n.ID)
+	}
+	// The ASN path wins over both.
+	e = winEnv()
+	e.set(func(e *env) { e.ipErr = nil })
+	if n := start(t, Config{Salt: "s"}, e).change(t); n.ID != "asn:12389" {
+		t.Errorf("with an ASN: %q", n.ID)
+	}
+}
+
+func TestLocalFallbackNeedsInterfaceAndGateway(t *testing.T) {
+	for name, f := range map[string]func(*env){
+		"no gateway": func(e *env) { e.ifc.Gateway = netip.Addr{} },
+		"no name":    func(e *env) { e.ifc.Name = "" },
+	} {
+		e := winEnv()
+		e.set(f)
+		r := start(t, Config{Salt: "s"}, e)
+		r.call(t)
+		r.noChange(t)
+		if n := r.w.Current(); n.Known || n.ID != "" {
+			t.Errorf("%s: Current = %+v", name, n)
+		}
+	}
+}
+
+func TestLocalIDSaltAndGatewayChange(t *testing.T) {
+	id := func(salt, gw string) string {
+		e := winEnv()
+		e.set(func(e *env) { e.ifc.Gateway = netip.MustParseAddr(gw) })
+		return string(start(t, Config{Salt: salt}, e).change(t).ID)
+	}
+	a1, a2 := id("salt-a", "192.168.1.1"), id("salt-a", "192.168.1.1")
+	if a1 != a2 {
+		t.Errorf("same salt and facts gave %q and %q", a1, a2)
+	}
+	if b := id("salt-b", "192.168.1.1"); a1 == b {
+		t.Errorf("different salts gave the same ID %q", a1)
+	}
+	if c := id("salt-a", "10.0.0.1"); a1 == c {
+		t.Errorf("different gateways gave the same ID %q", a1)
+	}
+}
+
+func TestLocalIDFollowsUplinkAndKeepsStable(t *testing.T) {
+	e := winEnv()
+	r := start(t, Config{Salt: "s", Debounce: time.Second, Refresh: time.Hour}, e)
+	first := r.change(t)
+	r.call(t)
+
+	// Re-identification on the same uplink: same ID, no event.
+	e.events <- netif.Event{Kind: netif.AddressChanged}
+	r.waiters(t, 2)
+	r.clk.Advance(time.Second)
+	r.call(t)
+	r.noChange(t)
+	if got := r.w.Current(); got.ID != first.ID {
+		t.Errorf("ID moved: %q → %q", first.ID, got.ID)
+	}
+
+	// A new gateway is a new network.
+	e.set(func(e *env) { e.ifc.Gateway = netip.MustParseAddr("10.0.0.1") })
+	e.events <- netif.Event{Kind: netif.UplinkChanged}
+	r.waiters(t, 2)
+	r.clk.Advance(time.Second)
+	second := r.change(t)
+	if !strings.HasPrefix(string(second.ID), "local:") || second.ID == first.ID {
+		t.Errorf("after gateway change: %q", second.ID)
+	}
+
+	// A different adapter on the same gateway is a new network too.
+	e.set(func(e *env) { e.ifc.Name = "Wi-Fi"; e.ifc.Index = 9 })
+	e.events <- netif.Event{Kind: netif.UplinkChanged}
+	r.waiters(t, 2)
+	r.clk.Advance(time.Second)
+	if third := r.change(t); third.ID == second.ID || third.ID == first.ID {
+		t.Errorf("after adapter change: %q", third.ID)
 	}
 }
 

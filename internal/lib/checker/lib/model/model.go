@@ -13,17 +13,17 @@ import (
 // MaxIDLen bounds a NetworkID: it becomes a JSON key and appears in logs.
 const MaxIDLen = 128
 
-// NetworkID is an opaque label for the current network, e.g. "asn:12389" or "gw:3f9a…".
+// NetworkID is an opaque label for the current network, e.g. "asn:12389", "gw:3f9a…" or "local:3f9a…".
 type NetworkID string
 
 // Valid reports whether id is non-empty, short, has no whitespace/control characters and starts with
-// "asn:" or "gw:" (a combined "asn:…/gw:…" also satisfies this).
+// "asn:", "gw:" or "local:" (a combined "asn:…/gw:…" also satisfies this).
 func (id NetworkID) Valid() bool {
 	s := string(id)
 	if s == "" || len(s) > MaxIDLen {
 		return false
 	}
-	if !strings.HasPrefix(s, "asn:") && !strings.HasPrefix(s, "gw:") {
+	if !strings.HasPrefix(s, "asn:") && !strings.HasPrefix(s, "gw:") && !strings.HasPrefix(s, "local:") {
 		return false
 	}
 	for _, r := range s {
