@@ -57,7 +57,8 @@ describe('listView and texts', () => {
   it('picks the right state', () => {
     expect(listView(base)).toBe('list');
     expect(listView({ ...base, engineDown: true })).toBe('down');
-    expect(listView({ ...base, learning: true })).toBe('learning');
+    expect(listView({ ...base, learning: true })).toBe('list');
+    expect(listView({ ...base, learning: true, total: 0, shown: 0 })).toBe('learning');
     expect(listView({ ...base, total: 0, shown: 0 })).toBe('learning');
     expect(listView({ ...base, loaded: false, total: 0, shown: 0 })).toBe('none-on-path');
     expect(listView({ ...base, shown: 0, query: 'zz' })).toBe('no-match');

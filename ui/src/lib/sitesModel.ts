@@ -44,7 +44,7 @@ export type ListView = 'down' | 'learning' | 'no-match' | 'none-on-path' | 'list
 
 export function listView(o: { engineDown: boolean; learning: boolean; loaded: boolean; total: number; shown: number; query: string }): ListView {
   if (o.engineDown) return 'down';
-  if (o.learning || (o.loaded && o.total === 0)) return 'learning';
+  if (o.total === 0 && (o.learning || o.loaded)) return 'learning';
   if (o.shown === 0) return o.query.trim() ? 'no-match' : 'none-on-path';
   return 'list';
 }
