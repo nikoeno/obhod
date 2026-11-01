@@ -545,6 +545,30 @@ func TestDegradedGoldens(t *testing.T) {
 	golden(t, "routes_degraded", e.get("/api/v1/routes").body)
 }
 
+// A problem of the desync engine rides along in the state payload while the connection stays up.
+func TestProblemsGoldens(t *testing.T) {
+	e := newEnv(t)
+	e.eng.fillFixtures()
+	e.eng.mu.Lock()
+	e.eng.snap.Problems = []status.Problem{
+		{Code: status.ProblemDesyncFailed, Message: "The desync program could not start. Picky sites may not open.",
+			Detail: "Exit: gave up after 5 restarts: exit status 87\nOutput:\nwinws2.exe: the filter is not valid"},
+		{Code: status.ProblemTunnelEngineFailed, Message: "The tunnel program stopped working. Blocked sites may not open."},
+	}
+	e.eng.mu.Unlock()
+	e.eng.setState(pc.StateConnected)
+	r := e.get("/api/v1/state")
+	var s struct {
+		State    string
+		Snapshot struct{ Problems []struct{ Code, Message, Detail string } }
+	}
+	r.json(t, &s)
+	if s.State != "connected" || len(s.Snapshot.Problems) != 2 || s.Snapshot.Problems[0].Code != "desync_failed" {
+		t.Fatalf("state = %s", r.body)
+	}
+	golden(t, "state_problems", r.body)
+}
+
 func TestGetGoldens(t *testing.T) {
 	e := newEnv(t)
 

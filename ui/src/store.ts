@@ -5,9 +5,10 @@
 // mocked invoke layer; the app creates one store and provides it with `provideStore`.
 
 import { inject, reactive, type App, type InjectionKey } from 'vue';
-import { BackendError, type Activated, type Backend, type CheckEvent, type ConnState, type EngineEvent, type EngineErrorBody, type EngineState, type NetworkSeen, type Route, type RouteInfo, type Server, type ServerTest, type SiteAction, type SiteRule, type Snapshot, type TestRequest, type Traffic } from './backend/types';
+import { BackendError, type Activated, type Backend, type CheckEvent, type ConnState, type EngineEvent, type EngineErrorBody, type EngineState, type NetworkSeen, type Route, type RouteInfo, type Problem, type Server, type ServerTest, type SiteAction, type SiteRule, type Snapshot, type TestRequest, type Traffic } from './backend/types';
 import { mergeChanges } from './lib/activityModel';
 import { errorInfo, type ErrorInfo } from './lib/errors';
+import { createProblemHold, HIDE_DELAY_MS } from './lib/problems';
 import { routes as routeCopy } from '../design/copy';
 
 export const SERIES_LEN = 30;
@@ -25,6 +26,8 @@ export interface StoreState {
   checking: boolean;
   checkingDomains: string[] | null;
   snapshot: Snapshot | null;
+  /** `snapshot.Problems`, cleaned and ordered; a gone problem stays for a short while so a restart does not flicker. */
+  problems: Problem[];
   networks: NetworkSeen[];
   routes: RouteInfo[];
   servers: Server[];
@@ -41,6 +44,8 @@ export interface StoreDeps {
   toast: (text: string) => void;
   /** Milliseconds between state reads while a server switch is pending (default 2000). Tests use a small value. */
   pollMs?: number;
+  /** Milliseconds a problem stays shown after the engine stops reporting it (default 1500). */
+  problemHideMs?: number;
 }
 
 export function newState(): StoreState {
@@ -53,6 +58,7 @@ export function newState(): StoreState {
     checking: false,
     checkingDomains: null,
     snapshot: null,
+    problems: [],
     networks: [],
     routes: [],
     servers: [],
@@ -73,6 +79,7 @@ export function createStore(backend: Backend, deps: StoreDeps) {
   const errorListeners = new Set<(info: ErrorInfo) => void>();
   let unlisten: (() => void) | null = null;
   let ticks = 0;
+  const hold = createProblemHold((shown) => (S.problems = shown), deps.problemHideMs ?? HIDE_DELAY_MS);
 
   /** Called when a new error appears in `state.error` (after a failed Start, a crash, a failed switch). */
   function onNewError(fn: (info: ErrorInfo) => void): () => void {
@@ -88,6 +95,7 @@ export function createStore(backend: Backend, deps: StoreDeps) {
     S.error = p.error ?? null;
     S.checking = !!p.checking;
     S.snapshot = p.snapshot;
+    hold.update(p.snapshot?.Problems ?? []);
     S.networks = p.networks ?? [];
     S.engineDown = false;
     S.loaded = true;
@@ -230,6 +238,7 @@ export function createStore(backend: Backend, deps: StoreDeps) {
   }
 
   function dispose(): void {
+    hold.stop();
     unlisten?.();
     unlisten = null;
   }

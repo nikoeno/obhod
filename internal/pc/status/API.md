@@ -32,10 +32,18 @@ type Snapshot struct {
     Processes  []Process
     Warnings   []string
     Recent     []Change              // last route changes
+    Problems   []Problem             // added 2026-11-01; empty (never nil from the pc app) when nothing is wrong
     Tunnel     string                // TunnelReady "ready" | TunnelNone "none" (added 2026-11-01): no detour server in use, routes that name the tunnel are served direct
 }
 
 const (TunnelReady = "ready"; TunnelNone = "none")
+
+// Problem (added 2026-11-01): something that does not work although the app is connected.
+type Problem struct {
+    Code    string // ProblemDesyncFailed "desync_failed" | ProblemTunnelEngineFailed "tunnel_engine_failed"; more may follow
+    Message string // fixed user-safe sentence: no paths, addresses or secrets
+    Detail  string // sanitized excerpt, at most 2 KB (exit status, last output lines); may be empty
+}
 
 type Process struct{ Name, State string; Restarts int }
 type Change struct{ Domain string; From, To route.Route; At time.Time }

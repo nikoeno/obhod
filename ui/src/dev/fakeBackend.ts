@@ -9,7 +9,7 @@
 import {
   BackendError,
   type Ack, type Activated, type Backend, type Change, type ConnState, type DevControls, type DevFlag, type EngineErrorBody,
-  type EngineEvent, type EngineState, type LogName, type Logs, type ProcessInfo, type Route, type RouteInfo, type Scenario, type Server,
+  type EngineEvent, type Problem, type EngineState, type LogName, type Logs, type ProcessInfo, type Route, type RouteInfo, type Scenario, type Server,
   type ServerTest, type SiteAction, type SiteRule, type Snapshot, type TestRequest, type TunnelState, type Version,
 } from '../backend/types';
 
@@ -31,6 +31,10 @@ const FAKE_START_DETAILS = [
   'splitter: config: open …/app.yaml: Access is denied.',
   'exit code: 1',
 ].join('\n');
+
+/** Samples of `Problems[].Detail` as the engine sanitizes it (file names only, no addresses). */
+const FAKE_DESYNC_DETAIL = ['Exit: gave up after 5 restarts: exit status 87', 'Output:', 'windivert: error opening filter: The parameter is incorrect.'].join('\n');
+const FAKE_TUNNEL_DETAIL = ['Exit: exit status 1', 'Output:', 'FATAL start service: initialize outbound[0]: <host> lookup failed'].join('\n');
 
 const NEEDS_SETUP: EngineErrorBody = {
   error: 'One-time setup is needed on this computer.',
@@ -115,7 +119,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
   const speed = opts.speed ?? 1;
   const trafficOn = opts.traffic ?? speed > 0;
   let scenario: Scenario = opts.scenario ?? 'normal';
-  const flags: Record<DevFlag, boolean> = { warnings: false, extras: false, learning: false, unidentified: false, reloadFails: false };
+  const flags: Record<DevFlag, boolean> = { warnings: false, extras: false, learning: false, unidentified: false, reloadFails: false, desyncFailed: false, tunnelFailed: false };
 
   let state: ConnState = 'disconnected';
   let error: EngineErrorBody | null = null;
@@ -251,6 +255,15 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     ];
   }
 
+  /** Engine behaviour (decision 44): problems exist only while connected and clear on disconnect; the flags keep "the program fails" until a restart. */
+  function problems(): Problem[] {
+    if (state !== 'connected') return [];
+    const out: Problem[] = [];
+    if (flags.desyncFailed) out.push({ Code: 'desync_failed', Message: 'The desync program could not start. Picky sites may not open.', Detail: FAKE_DESYNC_DETAIL });
+    if (flags.tunnelFailed) out.push({ Code: 'tunnel_engine_failed', Message: 'The tunnel program stopped working. Blocked sites may not open.', Detail: FAKE_TUNNEL_DETAIL });
+    return out;
+  }
+
   function snapshot(): Snapshot {
     const counts: Partial<Record<Route, number>> = {};
     for (const r of routes) counts[r.route] = (counts[r.route] ?? 0) + 1;
@@ -268,6 +281,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
       Warnings: flags.warnings ? ['IPv6 is not available on this network', 'The detour server is slower than usual'] : [],
       Recent: recent.slice(-20),
       Tunnel: tunnelNow(),
+      Problems: problems(),
     };
   }
 
@@ -354,7 +368,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
         emitState();
         emit({ kind: 'routes', data: { changes: [] } });
       }
-      if (key === 'warnings' || key === 'unidentified') emitState();
+      if (key === 'warnings' || key === 'unidentified' || key === 'desyncFailed' || key === 'tunnelFailed') emitState();
     },
     flags: () => ({ ...flags }),
   };
@@ -374,6 +388,9 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     },
     async engineRestart() {
       reset();
+      // A restart starts both programs again: the simulated failures are gone.
+      flags.desyncFailed = false;
+      flags.tunnelFailed = false;
       scenario = 'normal';
       engineRunning = true;
       seed();

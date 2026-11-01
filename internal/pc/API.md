@@ -66,7 +66,9 @@ func (a *App) State() State // disconnected | connecting | connected | disconnec
 // Ready is closed when the pre-flight passed, the checker runs and the status port is bound
 // (the state is Disconnected or later). If Run fails earlier it is never closed: watch Run's result too.
 func (a *App) Ready() <-chan struct{}
-func (a *App) Snapshot() status.Snapshot // what the status page shows; includes State and Tunnel (status.TunnelReady | status.TunnelNone)
+func (a *App) Snapshot() status.Snapshot // what the status page shows; includes State, Tunnel (status.TunnelReady | status.TunnelNone) and Problems (never nil)
+// Problems lists what does not work although the app is connected (added 2026-11-01); never nil. See "Problems".
+func (a *App) Problems() []status.Problem
 
 // RouteInfo is one table entry with its per-entry data.
 type RouteInfo struct {
@@ -290,6 +292,15 @@ The tunnel server is added to `desync.ExcludeIPs` automatically when the tunnel 
 `Config.Validate` (run when the config is loaded, and by `check-config`) also checks the children's fields that would otherwise fail only at connect time: the sing-box fields through a dry `singbox.Generate` (TUN address, FakeIP range, Clash API address and port, DoH server, which defaults to `analyzer.doh[0]` and must then have an IP host), `desync.Config.Check` (strategy options the app sets itself, ports, ranges) and `checker.Config.Validate`. A relative `singbox.binary`/`desync.binary` is made absolute against the current directory.
 
 Desync presets (decided 2026-11-01, stage 1 of 3; see `desync/API.md` and `desync/PRESETS.md`): `desync.preset` selects a ready-made strategy by a stable id (21 of them, translated from the zapret1 Discord/YouTube pack), `custom` (use `desync.strategy`, the raw zapret2 arguments; also what an older config that sets only `strategy` gets) or `auto` (valid since 2026-11-01, see "Desync presets: automatic selection" below; `Validate` accepts it and refuses `strategy` and `ports` with it, as for a named preset). Left empty it means `alt2-multisplit` (the default preset) unless `desync.strategy` is set; the default `app.yaml` written on the first start (`api/desktop`) writes the setting out with comments. A named preset refuses `desync.strategy` and `desync.ports`. A preset names fake payload files that must sit in a `fake` folder next to the engine binary; `buildPlan` checks `Plan.Requires` with `deps.fileExists` (nil in tests: not checked) and a missing file ends the connect like a missing program (`errProgramMissing`, code `program_missing`, the log line names the file and the preset; the fixed UI sentence is unchanged). `check-config` only prints a line for a missing payload file. On Linux the nft check also compares the queue rules' destination ports (`tcp dport`, `udp dport`) with the listing, so a table written for the custom strategy (TCP 80, 443 only) is reported as stale when a preset needs more ports or the UDP rule.
+
+### Problems (added 2026-11-01)
+
+A failure the user must know about is a `status.Problem{Code, Message, Detail}` in `Snapshot.Problems` (and `App.Problems()`), announced by a `state` event; `Message` is a fixed sentence, `Detail` a sanitized excerpt of at most 2 KB. Codes:
+
+- `desync_failed` (message "The desync program could not start. Picky sites may not open."): procman reported the desync engine (winws2/nfqws2) `failed` (it gave up after its restarts; Detail is `Exit: <procman's reason, e.g. gave up after 5 restarts: exit status 87>` and the last output lines); or a reload could not (re)start it (plan not buildable, e.g. engine binary or payload file missing; nft/ip rule not applied; files not written; `Start`/`Restart` error). The connection state is **not** changed: the app stays `connected`, `LastError` stays unset. Cleared when the engine is started successfully (reload or connect), when no site needs the engine any more, on `Disconnect` and at the start of `Connect`. A new failure replaces the entry of the same code. A failed `Connect` is still reported through `LastError`, not here. Limit: the engine has no readiness probe, so a successful `Start` of a program that then crashes in a loop clears the entry until procman gives up again (about 5 restarts, backoff 1 s to 16 s).
+- `tunnel_engine_failed` (message "The tunnel program stopped working. Blocked sites may not open."): sing-box was lost while connected. The app disconnects as before (`LastError` `crashed`); the problem is set **after** the disconnect so it survives it, and is cleared by the next `Connect`.
+
+Sanitizing of `Detail` (`problems.go`): colour codes and control characters removed; absolute paths (Windows, UNC, unix) reduced to the file name; IPv4, IPv6 (also `[addr]:port` and `addr:port`) become `<addr>`, host names and `host:port` become `<host>`, `localhost:port` becomes `<addr>`; the Clash secret, UUIDs and 24+ character token-like words become `<secret>`; lines are capped at 200 runes, the last 20 output lines are kept and the oldest are dropped first to fit 2048 bytes. The codes set may grow; consumers show unknown codes with their `Message`.
 
 ### Desync presets: automatic selection
 

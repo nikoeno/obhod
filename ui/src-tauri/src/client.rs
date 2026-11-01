@@ -360,6 +360,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_additive_problems_list_passes_through_unchanged() {
+        let (srv, api) = setup().await;
+        let body = testdata("state_problems.golden.json");
+        srv.reply("GET", "/api/v1/state", 200, &body);
+        let got = api.state().await.unwrap();
+        assert_eq!(got, serde_json::from_str::<Value>(&body).unwrap());
+        let problems = got["snapshot"]["Problems"].as_array().unwrap();
+        assert_eq!(problems.len(), 2);
+        assert_eq!(problems[0]["Code"], "desync_failed");
+        assert!(problems[0]["Detail"].as_str().unwrap().contains("exit status 87"));
+        assert_eq!(problems[1]["Code"], "tunnel_engine_failed");
+        // The connection stays up while a problem exists.
+        assert_eq!(got["state"], "connected");
+        // Other goldens carry an empty list, which also passes through.
+        srv.reply("GET", "/api/v1/state", 200, &testdata("state_connected.golden.json"));
+        assert_eq!(api.state().await.unwrap()["snapshot"]["Problems"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
     async fn get_endpoints_parse_their_golden_files() {
         let (srv, api) = setup().await;
         srv.reply("GET", "/api/v1/routes", 200, &testdata("routes_filled.golden.json"));

@@ -550,6 +550,9 @@ func normalizeSnapshot(s *status.Snapshot) {
 	if s.Warnings == nil {
 		s.Warnings = []string{}
 	}
+	if s.Problems == nil {
+		s.Problems = []status.Problem{}
+	}
 	s.Recent = apiChanges(s.Recent)
 }
 

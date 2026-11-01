@@ -26,22 +26,23 @@ func TestFilterClauses(t *testing.T) {
 	}{
 		{"interface only", 7, nil, nil, "ifIdx == 7"},
 		{"ipv4 host", 7, []netip.Prefix{pfx("203.0.113.7/32")}, nil,
-			"ifIdx == 7 and not (ip.DstAddr == 203.0.113.7)"},
+			"ifIdx == 7 and (ipv6 or ip.DstAddr != 203.0.113.7)"},
 		{"ipv4 net", 7, []netip.Prefix{pfx("10.0.0.0/8")}, nil,
-			"ifIdx == 7 and not ((ip.DstAddr >= 10.0.0.0 and ip.DstAddr <= 10.255.255.255))"},
+			"ifIdx == 7 and (ipv6 or ip.DstAddr < 10.0.0.0 or ip.DstAddr > 10.255.255.255)"},
 		{"unmasked prefix", 7, []netip.Prefix{pfx("192.168.5.9/24")}, nil,
-			"ifIdx == 7 and not ((ip.DstAddr >= 192.168.5.0 and ip.DstAddr <= 192.168.5.255))"},
+			"ifIdx == 7 and (ipv6 or ip.DstAddr < 192.168.5.0 or ip.DstAddr > 192.168.5.255)"},
 		{"ipv6 host", 7, []netip.Prefix{pfx("2001:db8::1/128")}, nil,
-			"ifIdx == 7 and not (ipv6.DstAddr == 2001:db8::1)"},
+			"ifIdx == 7 and (ip or ipv6.DstAddr != 2001:db8::1)"},
 		{"ipv6 net", 7, []netip.Prefix{pfx("2001:db8::/32")}, nil,
-			"ifIdx == 7 and not ((ipv6.DstAddr >= 2001:db8:: and ipv6.DstAddr <= 2001:db8:ffff:ffff:ffff:ffff:ffff:ffff))"},
+			"ifIdx == 7 and (ip or ipv6.DstAddr < 2001:db8:: or ipv6.DstAddr > 2001:db8:ffff:ffff:ffff:ffff:ffff:ffff)"},
 		{"mixed", 3, []netip.Prefix{pfx("2001:db8::/32"), pfx("203.0.113.0/30"), pfx("198.51.100.1/32")}, nil,
-			"ifIdx == 3 and not ((ip.DstAddr >= 203.0.113.0 and ip.DstAddr <= 203.0.113.3) or ip.DstAddr == 198.51.100.1)" +
-				" and not ((ipv6.DstAddr >= 2001:db8:: and ipv6.DstAddr <= 2001:db8:ffff:ffff:ffff:ffff:ffff:ffff))"},
+			"ifIdx == 3 and (ip or ipv6.DstAddr < 2001:db8:: or ipv6.DstAddr > 2001:db8:ffff:ffff:ffff:ffff:ffff:ffff)" +
+				" and (ipv6 or ip.DstAddr < 203.0.113.0 or ip.DstAddr > 203.0.113.3)" +
+				" and (ipv6 or ip.DstAddr != 198.51.100.1)"},
 		{"zero prefix", 3, []netip.Prefix{pfx("0.0.0.0/0")}, nil,
-			"ifIdx == 3 and not ((ip.DstAddr >= 0.0.0.0 and ip.DstAddr <= 255.255.255.255))"},
+			"ifIdx == 3 and (ipv6 or ip.DstAddr < 0.0.0.0 or ip.DstAddr > 255.255.255.255)"},
 		{"ports", 3, nil, [][2]uint16{{50000, 50099}, {8080, 8080}},
-			"ifIdx == 3 and not ((tcp.SrcPort >= 50000 and tcp.SrcPort <= 50099) or tcp.SrcPort == 8080)"},
+			"ifIdx == 3 and (not tcp or tcp.SrcPort < 50000 or tcp.SrcPort > 50099) and (not tcp or tcp.SrcPort != 8080)"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

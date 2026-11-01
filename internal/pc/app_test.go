@@ -503,7 +503,7 @@ func TestStartupOrder(t *testing.T) {
 		t.Fatalf("engine spec = %+v", eng)
 	}
 	// The tunnel server is protected without the user listing it.
-	if !strings.Contains(strings.Join(eng.Args, " "), "ip.DstAddr == 203.0.113.7") {
+	if !strings.Contains(strings.Join(eng.Args, " "), "ip.DstAddr != 203.0.113.7") {
 		t.Fatalf("tunnel server not excluded: %q", eng.Args)
 	}
 	cfg := h.singBoxFile()

@@ -9,6 +9,7 @@ import RemoveServerDialog from './components/RemoveServerDialog.vue';
 import SetupDialog from './components/SetupDialog.vue';
 import Toasts from './components/Toasts.vue';
 import type { IconName } from './lib/icons';
+import { problemStatus } from './lib/problems';
 import { toast } from './lib/toast';
 import Activity from './pages/Activity.vue';
 import Help from './pages/Help.vue';
@@ -36,9 +37,10 @@ const NAV: Array<{ page: PageName; icon: IconName; keys?: string }> = [
 const statusWord = computed(() => {
   if (!S.loaded) return 'Connecting to the engine…';
   if (S.engineDown) return 'Engine not running';
+  if (S.state === 'connected' && S.problems.length) return problemStatus(S.problems.length);
   return { connected: 'On', connecting: 'Starting…', disconnecting: 'Stopping…' }[S.state as string] ?? (S.error ? 'Off (error)' : 'Off');
 });
-const statusClass = computed(() => (S.engineDown ? 'down' : S.state));
+const statusClass = computed(() => (S.engineDown ? 'down' : S.state === 'connected' && S.problems.length ? 'connected problem' : S.state));
 
 watch(
   () => route.page,

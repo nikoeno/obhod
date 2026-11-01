@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { BackendError, type EngineEvent } from './backend/types';
 import { isLearning } from './lib/errors';
 import { filterSites, listView } from './lib/sitesModel';
+import { createFakeBackend } from './dev/fakeBackend';
+import { createStore, type Store } from './store';
 import { flush, makeStore, until } from './test/helpers';
 
 describe('store with the fake backend', () => {
@@ -507,5 +509,63 @@ describe('per-site rules in the store', () => {
     const e = await store.setSite('x.example', 'block').catch((x: unknown) => x);
     expect((e as BackendError).code).toBe('engine_unreachable');
     expect(store.S.engineDown).toBe(true);
+  });
+});
+
+describe('engine problems (snapshot.Problems, decision 44)', () => {
+  const desync = { Code: 'desync_failed', Message: 'The desync program could not start. Picky sites may not open.', Detail: 'Exit: gave up\u0000 after 5 restarts: exit status 87' };
+
+  async function connected(problemHideMs = 30) {
+    const backend = createFakeBackend({ speed: 0, traffic: false });
+    const store = createStore(backend, { toast: () => {}, problemHideMs });
+    await store.init();
+    await store.toggleConnection();
+    await until(() => store.S.state === 'connected');
+    return { store, backend };
+  }
+  const send = (store: Store, p: unknown) =>
+    store.onEvent({ kind: 'state', data: { state: 'connected', error: null, checking: false, snapshot: { ...store.S.snapshot!, Problems: p as never }, networks: [] } });
+
+  it('has none by default; an older engine without the field counts as none', async () => {
+    const { store } = await connected();
+    expect(store.S.problems).toEqual([]);
+    const snap = { ...store.S.snapshot! };
+    delete snap.Problems;
+    store.onEvent({ kind: 'state', data: { state: 'connected', error: null, checking: false, snapshot: snap, networks: [] } });
+    expect(store.S.problems).toEqual([]);
+    store.dispose();
+  });
+
+  it('shows a problem from a state event at once, cleaned, and the connection stays connected', async () => {
+    const { store } = await connected();
+    send(store, [{ ...desync, Detail: `${desync.Detail}\n${'x'.repeat(9000)}` }]);
+    expect(store.S.state).toBe('connected');
+    expect(store.S.problems).toHaveLength(1);
+    expect(store.S.problems[0]!.Detail).not.toContain('\u0000');
+    expect(store.S.problems[0]!.Detail.length).toBeLessThanOrEqual(4001);
+    store.dispose();
+  });
+
+  it('keeps a problem briefly after the engine stops reporting it, then drops it', async () => {
+    const { store } = await connected();
+    send(store, [desync]);
+    send(store, []);
+    expect(store.S.problems).toHaveLength(1);
+    await until(() => store.S.problems.length === 0);
+    store.dispose();
+  });
+
+  it('follows the fake backend switches; a simulated restart clears them', async () => {
+    const { store, backend } = await connected();
+    backend.dev!.setFlag('desyncFailed', true);
+    await until(() => store.S.problems.length === 1);
+    expect(store.S.problems[0]!.Detail).toContain('exit status 87');
+    backend.dev!.setFlag('tunnelFailed', true);
+    await until(() => store.S.problems.length === 2);
+    expect(store.S.problems.map((p) => p.Code)).toEqual(['desync_failed', 'tunnel_engine_failed']);
+    await store.restartEngine(true);
+    expect(backend.dev!.flags()).toMatchObject({ desyncFailed: false, tunnelFailed: false });
+    await until(() => store.S.problems.length === 0, 2000);
+    store.dispose();
   });
 });

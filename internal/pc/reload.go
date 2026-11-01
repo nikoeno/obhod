@@ -14,6 +14,7 @@ import (
 	"github.com/nikoejento/obhod/internal/lib/route"
 	"github.com/nikoejento/obhod/internal/pc/desync"
 	"github.com/nikoejento/obhod/internal/pc/singbox"
+	"github.com/nikoejento/obhod/internal/pc/status"
 )
 
 // noTunnelExclude fills desync.Config.ExcludeIPs when no tunnel server is in use.
@@ -281,6 +282,7 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 	// built leaves the engine as it is; sing-box is still updated.
 	if r.planErr != nil {
 		a.log.Error("reload: desync plan failed; the engine keeps its current state", "err", r.planErr)
+		a.desyncProblem("", r.planErr)
 	} else {
 		a.applyEngine(ctx, r.plan)
 	}
@@ -384,6 +386,7 @@ func (a *App) applyEngine(ctx context.Context, plan desync.Plan) error {
 			a.mu.Unlock()
 			a.log.Info("desync engine stopped: no desync domains")
 		}
+		a.clearProblem(status.ProblemDesyncFailed) // nothing needs the engine any more
 		return nil
 	}
 	setup := strings.Join(plan.Setup, "\n")
@@ -397,11 +400,13 @@ func (a *App) applyEngine(ctx context.Context, plan desync.Plan) error {
 	if !eng.running || eng.setup != setup {
 		if err := a.checkNFT(ctx, plan); err != nil {
 			a.log.Error("reload: desync engine not (re)started", "err", err)
+			a.desyncProblem("", err)
 			return err
 		}
 	}
 	if err := a.writePlanFiles(plan); err != nil {
 		a.log.Error("reload: write desync files", "err", err)
+		a.desyncProblem("", err)
 		return err
 	}
 	sctx, cancel := context.WithTimeout(ctx, stepTimeout)
@@ -414,9 +419,11 @@ func (a *App) applyEngine(ctx context.Context, plan desync.Plan) error {
 	}
 	if err != nil {
 		a.log.Error("reload: start desync engine", "err", err)
+		a.desyncProblem(string(plan.Engine), err)
 		return err
 	}
 	a.rememberEngine(plan)
+	a.clearProblem(status.ProblemDesyncFailed)
 	return nil
 }
 

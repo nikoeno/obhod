@@ -5,8 +5,11 @@ import { actions, pages } from '../../design/copy';
 import Tabs from '../components/Tabs.vue';
 import ProcessList from '../components/ProcessList.vue';
 import { ACTIVITY_TABS, CHART_H, CHART_W, bars, changeRows, charts, networkFacts, networkRows, parseTab, trafficStats, warningRows, type ActivityTab } from '../lib/activityModel';
+import { problemViews } from '../lib/problems';
 import { go, route } from '../router';
 import { useStore } from '../store';
+import { copyText } from '../lib/clipboard';
+import { toast } from '../lib/toast';
 import { view } from '../ui';
 
 const store = useStore();
@@ -24,7 +27,12 @@ const tabModel = computed({ get: () => tab.value as string, set: (v: string) => 
 
 const snapshot = computed(() => (S.engineDown ? null : S.snapshot));
 const warnings = computed(() => warningRows(snapshot.value?.Warnings));
-const tabs = computed(() => ACTIVITY_TABS.map((id) => ({ id, label: t.tabs[id], ...(id === 'warnings' ? { count: warnings.value.length } : {}) })));
+// Problems (something does not work) come first on the Warnings tab and count with the warnings.
+const problems = computed(() => (S.engineDown ? [] : problemViews(S.problems)));
+const tabs = computed(() => ACTIVITY_TABS.map((id) => ({ id, label: t.tabs[id], ...(id === 'warnings' ? { count: warnings.value.length + problems.value.length } : {}) })));
+async function copyProblem(text: string): Promise<void> {
+  toast((await copyText(text)) ? pages.home.problems.copied : pages.home.problems.copyFailed);
+}
 
 // Changes
 const changes = computed(() => changeRows(snapshot.value?.Recent, view.changesClearedAt));
@@ -108,8 +116,18 @@ const nets = computed(() => networkRows(S.networks));
       </template>
 
       <template v-else>
-        <p v-if="!warnings.length" class="empty">{{ t.noWarnings }}</p>
-        <ul v-else class="warnlist">
+        <ul v-if="problems.length" class="warnlist problemlist" :aria-label="pages.home.problems.label">
+          <li v-for="p in problems" :key="p.key" class="card">
+            <strong>{{ p.text }}</strong>
+            <details v-if="p.detail" class="problem-details">
+              <summary>{{ pages.home.problems.summary }}</summary>
+              <pre class="code" tabindex="0" :aria-label="pages.home.problems.detailsLabel">{{ p.detail }}</pre>
+              <button class="btn small" type="button" @click="copyProblem(p.detail)">{{ actions.copy }}</button>
+            </details>
+          </li>
+        </ul>
+        <p v-if="!warnings.length && !problems.length" class="empty">{{ t.noWarnings }}</p>
+        <ul v-else-if="warnings.length" class="warnlist">
           <li v-for="w in warnings" :key="w.text" class="card">
             <strong>{{ w.text }}</strong>
             <p class="muted">{{ w.why }}</p>

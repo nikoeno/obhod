@@ -165,6 +165,7 @@ type App struct {
 	dialClash  clashapi.Client
 	binaries   binaries
 	sbTunnel   bool // the running sing-box config has a tunnel outbound (false: degraded, tunnel routes go direct)
+	problems   []status.Problem // things that do not work while connected (problems.go); cleared on Connect and Disconnect
 
 	release     func()        // releases the single-instance lock
 	onFatal     func(error)   // ends Run with an error
@@ -546,6 +547,7 @@ func (a *App) Connect(ctx context.Context) error {
 		return nil
 	}
 	a.setLastError(nil, false) // the connecting event that follows carries the cleared error
+	a.clearProblems()
 	a.setState(StateConnecting)
 	if err := a.connectLocked(ctx); err != nil {
 		if ctx.Err() == nil { // a connect cancelled by the caller or by shutdown is no error
@@ -595,6 +597,7 @@ func (a *App) disconnectLocked(ctx context.Context) error {
 	a.mu.Lock()
 	a.engine = engineState{}
 	a.pending = nil // a server activated while connected stays; the next connect uses it
+	a.problems = nil
 	a.mu.Unlock()
 	a.setState(StateDisconnected)
 	return errors.Join(errs...)
@@ -633,6 +636,7 @@ func (a *App) connectLocked(ctx context.Context) error {
 			return a.startError("desync engine", err)
 		}
 		a.rememberEngine(r.plan)
+		a.clearProblem(status.ProblemDesyncFailed)
 	}
 
 	// sing-box.
@@ -830,6 +834,7 @@ func (a *App) logProcEvents(ctx context.Context) {
 					a.engine = engineState{}
 				}
 				a.mu.Unlock()
+				a.procFailed(e.Name, e.Err) // the user must know; the connection stays up
 			}
 		}
 	}
@@ -880,6 +885,8 @@ func (a *App) singBoxLostLocked(ctx context.Context, cause error) {
 	if err := a.disconnectLocked(dctx); err != nil {
 		a.log.Error("disconnect after the sing-box failure", "err", err)
 	}
+	// Set after the disconnect, which clears the list: the user sees why the connection ended.
+	a.setProblem(status.Problem{Code: status.ProblemTunnelEngineFailed, Message: msgTunnelEngineFailed, Detail: a.problemDetail(nameSingBox, cause)})
 	if a.ui {
 		return
 	}

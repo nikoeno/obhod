@@ -103,7 +103,7 @@ Tests: re-exec the test binary as the helper (`TestHelperProcess` pattern, modes
 Files: `winws.go`, `filter.go` (WinDivert filter builder), `winws_test.go`, `testdata/*.golden`.
 
 - Hostlist: sorted, deduped, one domain per line, `\n` endings. Args reference it as `hostlist.txt` (resolved relative to the process `Dir`).
-- Filter: `outbound and tcp and (tcp.DstPort == 443 or …) and ifIdx == N and not (ip.DstAddr in excludes / ipv6.DstAddr …) and not (tcp.SrcPort >= a and tcp.SrcPort <= b …)`. Build it from small helpers so each clause can be unit-tested.
+- Filter: `ifIdx == N and (ipv6 or ip.DstAddr < a or ip.DstAddr > b) and (ip or ipv6.DstAddr …) and (not tcp or tcp.SrcPort < a or tcp.SrcPort > b)` (WinDivert cannot negate a group, so no `not (...)`; winws2 adds the outbound/port part itself). Build it from small helpers so each clause can be unit-tested.
 - Validation: at least one domain, `IfIndex > 0`, valid prefixes, `from <= to` for every port range.
 - zapret2 order: `--wf-tcp-out=<Ports>`, `--wf-raw-filter=<filter>` (ANDed with the rest by winws2), `--lua-init=@<LuaDir>/zapret-lib.lua`, `--lua-init=@<LuaDir>/zapret-antidpi.lua`, `--hostlist=hostlist.txt`, then the Lua strategy args verbatim (`--filter-l7`, `--payload`, `--out-range`, `--lua-desync=...`).
 

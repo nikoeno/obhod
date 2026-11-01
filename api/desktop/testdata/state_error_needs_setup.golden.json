@@ -53,7 +53,8 @@
         "At": "2026-10-31T12:05:00Z"
       }
     ],
-    "Tunnel": "ready"
+    "Tunnel": "ready",
+    "Problems": []
   },
   "networks": [
     {

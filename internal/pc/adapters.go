@@ -106,6 +106,7 @@ func (s *statusSource) Snapshot() status.Snapshot {
 	a.mu.Lock()
 	mon, watch := a.monitor, a.clashWatch
 	snap.Recent = append([]status.Change(nil), a.recent...)
+	snap.Problems = append([]status.Problem{}, a.problems...)
 	a.mu.Unlock()
 	if watch != nil && watch.down() {
 		snap.Warnings = append(snap.Warnings, "sing-box's Clash API is not answering: traffic stats and failure detection are paused")

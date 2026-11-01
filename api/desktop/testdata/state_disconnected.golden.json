@@ -30,7 +30,8 @@
     ],
     "Warnings": [],
     "Recent": [],
-    "Tunnel": "none"
+    "Tunnel": "none",
+    "Problems": []
   },
   "networks": []
 }

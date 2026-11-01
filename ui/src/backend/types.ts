@@ -28,7 +28,15 @@ export interface Snapshot {
    * older engine, which the UI reads as `ready`.
    */
   Tunnel?: TunnelState;
+  /**
+   * Things that do not work although the connection stays up (decision 44, added 2026-11-01): `[]` when
+   * nothing is wrong, absent from an older engine. `Detail` is sanitized by the engine; the UI cleans it again.
+   */
+  Problems?: Problem[];
 }
+
+/** `Code` is `desync_failed` or `tunnel_engine_failed` today; more may follow (shown with their `Message`). */
+export interface Problem { Code: string; Message: string; Detail: string }
 
 export type TunnelState = 'ready' | 'none';
 
@@ -118,7 +126,7 @@ export class BackendError extends Error {
 
 /** Scenarios of the dev-only fake backend. */
 export type Scenario = 'normal' | 'no-server' | 'tunnel-missing' | 'permission-denied' | 'needs-setup' | 'crash' | 'engine-unreachable';
-export type DevFlag = 'warnings' | 'extras' | 'learning' | 'unidentified' | 'reloadFails';
+export type DevFlag = 'warnings' | 'extras' | 'learning' | 'unidentified' | 'reloadFails' | 'desyncFailed' | 'tunnelFailed';
 
 /** Dev-only controls; only the fake backend provides them. */
 export interface DevControls {

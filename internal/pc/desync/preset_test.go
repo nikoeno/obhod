@@ -130,7 +130,7 @@ func checkPresetPlan(t *testing.T, p Preset, e Engine, plan Plan) {
 	case WinWS:
 		// uplink, tunnel exclusion and probe ports stay in the one raw filter
 		for _, w := range []string{"--wf-tcp-out=80,443,2053,2083,2087,2096,8443", "--wf-udp-out=443",
-			"ifIdx == 9", "not (ip.DstAddr == 203.0.113.7)", "tcp.SrcPort >= 50000"} {
+			"ifIdx == 9", "(ipv6 or ip.DstAddr != 203.0.113.7)", "(not tcp or tcp.SrcPort < 50000 or tcp.SrcPort > 50099)"} {
 			if !strings.Contains(all, w) {
 				t.Errorf("args lack %q:\n%s", w, all)
 			}

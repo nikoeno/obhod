@@ -114,6 +114,21 @@ export const pages = {
       copied: 'Details copied.',
       copyFailed: 'Could not copy. Select the text instead.',
     },
+    /** Banners for `snapshot.Problems`: something does not work while the app is on. No network words. */
+    problems: {
+      desync_failed: 'The quiet fix could not start. Picky sites may not open.',
+      tunnel_engine_failed: 'The detour stopped working. Blocked sites may not open.',
+      /** An unknown code without a sentence of its own. */
+      unknown: 'Something is not working.',
+      label: 'Problems',
+      summary: 'Details',
+      hint: 'What the engine reported. It stays on this computer; copy it if you ask for help.',
+      detailsLabel: 'Problem details',
+      copied: 'Details copied.',
+      copyFailed: 'Could not copy. Select the text instead.',
+      /** The status line of the app shell. */
+      status: { one: 'On, with a problem', other: 'On, with {n} problems' },
+    },
   },
   sites: {
     title: 'Sites',

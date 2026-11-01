@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // DEV ONLY (Ctrl+Shift+D): scenario and data switches for the fake backend. Not in production builds.
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import type { DevFlag, Scenario } from '../backend/types';
 import { useStore } from '../store';
 import css from './devpanel.css?inline';
@@ -24,10 +24,20 @@ const FLAGS: Array<[DevFlag, string]> = [
   ['learning', 'Still learning (no network yet, empty list)'],
   ['unidentified', 'First run: network not identified, sites listed'],
   ['reloadFails', 'Switching server while On fails'],
+  ['desyncFailed', 'Problem: the quiet fix could not start (cleared by Restart engine)'],
+  ['tunnelFailed', 'Problem: the detour program stopped (cleared by Restart engine)'],
 ];
 
 const scenario = ref<Scenario>(dev?.scenario() ?? 'normal');
-const flags = reactive<Record<DevFlag, boolean>>(dev?.flags() ?? { warnings: false, extras: false, learning: false, unidentified: false, reloadFails: false });
+const flags = reactive<Record<DevFlag, boolean>>(dev?.flags() ?? { warnings: false, extras: false, learning: false, unidentified: false, reloadFails: false, desyncFailed: false, tunnelFailed: false });
+
+// A simulated restart clears the problem switches: follow the backend.
+watch(
+  () => store.S.snapshot,
+  () => {
+    if (dev) Object.assign(flags, dev.flags());
+  },
+);
 
 function pick(s: Scenario): void {
   scenario.value = s;

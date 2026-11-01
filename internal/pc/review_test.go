@@ -234,7 +234,7 @@ func TestHostNameTunnelIsResolvedAndExcluded(t *testing.T) {
 	h.waitOp("start winws2")
 	eng, _ := h.procs.spec("winws2")
 	args := strings.Join(eng.Args, " ")
-	if !strings.Contains(args, "ip.DstAddr == 198.51.100.77") || !strings.Contains(args, "ipv6.DstAddr == 2001:db8::77") {
+	if !strings.Contains(args, "ip.DstAddr != 198.51.100.77") || !strings.Contains(args, "ipv6.DstAddr != 2001:db8::77") {
 		t.Fatalf("resolved tunnel addresses not excluded: %q", eng.Args)
 	}
 }

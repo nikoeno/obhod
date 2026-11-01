@@ -8,6 +8,8 @@ Per-site rules (2026-11-01): Sites has **Add a site** and, in the side panel, **
 
 No detour server (2026-11-01): **Start works without one** (the engine connects in its Everyday + Picky only mode). The snapshot's additive `Tunnel` (`ready` | `none`) and `degraded` on each route are passed through unchanged by the Rust side (`api_state`, `api_routes` and the `state` event are validated JSON, not structs). Home shows "Running without a detour server..." with **Add server** (no more Skip for now), the Blocked card gets a muted caveat, and Sites flags `degraded` rows with **No detour**. After a server is made active while On, the store reads `GET /state` every 2 s (up to 45 s) until `Tunnel` is `ready`. In `npm run dev` the scenario **No detour server** shows all of it (add and activate a server from Settings and the flags clear); **Detour server cannot be used** keeps the `tunnel_missing` failure.
 
+Problems (2026-11-01): the engine's additive `snapshot.Problems` (`[{Code, Message, Detail}]`, decision 44) is passed through unchanged by the Rust side. The store keeps `S.problems` (cleaned: `Detail` capped at 4000 characters, control characters removed, duplicates merged; hidden 1.5 s after the engine stops reporting a problem). Home shows one non-dismissable warning banner per problem (known codes in the app's own words: "The quiet fix could not start. Picky sites may not open."; unknown codes show `Message` only) with a collapsed **Details** box, **Copy** and **Restart engine**; the status line says "On, with a problem" and Activity → Warnings lists them first. In `npm run dev` the Ctrl+Shift+D switches "Problem: the quiet fix could not start" and "Problem: the detour program stopped" raise them while On; **Restart engine** clears them. Pure logic: `src/lib/problems.ts`.
+
 ## How it fits together
 
 ```
@@ -29,7 +31,7 @@ Vue 3 frontend (webview)  --invoke / events-->  Rust (src-tauri)  --HTTP + beare
 | Command | What |
 |---|---|
 | `npm ci` | reproducible install from `package-lock.json` |
-| `npm run dev` | Vite dev server on http://127.0.0.1:1420 in a plain browser, with the **fake backend** (no Rust, no engine, no other server to start). `Ctrl+Shift+D` opens the scenario panel: scenarios (normal, no-server (Start works without a server), tunnel-missing (Start fails), permission-denied, needs-setup, crash, engine-unreachable) and data switches (warnings, proxy and blocked-by-you sites, still learning, first run with the network not identified yet, a failing server switch). Every page reads from it, so each one can be checked in every scenario |
+| `npm run dev` | Vite dev server on http://127.0.0.1:1420 in a plain browser, with the **fake backend** (no Rust, no engine, no other server to start). `Ctrl+Shift+D` opens the scenario panel: scenarios (normal, no-server (Start works without a server), tunnel-missing (Start fails), permission-denied, needs-setup, crash, engine-unreachable) and data switches (warnings, engine problems (quiet fix failed, detour program stopped), proxy and blocked-by-you sites, still learning, first run with the network not identified yet, a failing server switch). Every page reads from it, so each one can be checked in every scenario |
 | `npm run typecheck` | `vue-tsc --noEmit` |
 | `npm test` | vitest (store, error mapping, view models of Home / Sites / Activity / Help, per-site rules (input cleaning, errors, dialog model), server dialog logic, mocked invoke layer, source rules, icon sync) |
 | `npm run build` | typecheck + production web build into `dist/` (no fake backend inside) |

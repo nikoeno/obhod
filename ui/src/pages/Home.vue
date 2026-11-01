@@ -9,6 +9,7 @@ import { fmtAgo, fmtBytes, fill, pct, plural } from '../lib/format';
 import { copyText } from '../lib/clipboard';
 import { blockedCaveat, buttonModel, detourNotice, detourNoticeText, noDetour, startDetails, subAction } from '../lib/homeModel';
 import { fanPaths } from '../lib/icons';
+import { problemViews } from '../lib/problems';
 import { serverText, serverErrorText } from '../lib/serverText';
 import { toast } from '../lib/toast';
 import { go } from '../router';
@@ -33,6 +34,21 @@ const details = computed(() => startDetails(S.engineDown, S.startError));
 async function copyDetails(): Promise<void> {
   if (!details.value) return;
   toast((await copyText(details.value)) ? pages.home.startDetails.copied : pages.home.startDetails.copyFailed);
+}
+
+// Something does not work although the app is on (snapshot.Problems): always visible while it lasts, no close button.
+const problems = computed(() => (S.engineDown ? [] : problemViews(S.problems)));
+const restarting = ref(false);
+async function restartFromProblem(): Promise<void> {
+  restarting.value = true;
+  try {
+    await store.restartEngine();
+  } finally {
+    restarting.value = false;
+  }
+}
+async function copyProblem(text: string): Promise<void> {
+  toast((await copyText(text)) ? pages.home.problems.copied : pages.home.problems.copyFailed);
 }
 
 // Start never waits for a detour server; this card only invites the user to add or pick one.
@@ -83,6 +99,21 @@ async function useServer(id: string, name: string): Promise<void> {
   <section class="page home" aria-labelledby="home-h">
     <h1 id="home-h" class="sr-only">{{ pages.nav.home }}</h1>
 
+    <div v-if="problems.length" class="problems" role="alert" :aria-label="pages.home.problems.label">
+      <div v-for="p in problems" :key="p.key" class="banner problem">
+        <span class="banner-icon" aria-hidden="true">!</span>
+        <div class="grow">
+          <p class="problem-text">{{ p.text }}</p>
+          <details v-if="p.detail" class="problem-details">
+            <summary>{{ pages.home.problems.summary }}</summary>
+            <p class="small">{{ pages.home.problems.hint }}</p>
+            <pre class="code" tabindex="0" :aria-label="pages.home.problems.detailsLabel">{{ p.detail }}</pre>
+            <button class="btn small" type="button" @click="copyProblem(p.detail)">{{ actions.copy }}</button>
+          </details>
+        </div>
+        <button class="btn small" type="button" :disabled="restarting" @click="restartFromProblem">{{ actions.restartEngine }}</button>
+      </div>
+    </div>
     <div v-if="failedSwitch" class="banner" role="alert">
       <span class="banner-icon" aria-hidden="true">!</span>
       <span class="grow">{{ failedSwitch.sentence }}</span>

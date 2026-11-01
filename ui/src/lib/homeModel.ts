@@ -5,6 +5,7 @@ import { bigButton, firstRun, pages } from '../../design/copy';
 import type { ConnState, EngineErrorBody, Server, Snapshot } from '../backend/types';
 import { errorInfo, type ErrorInfo } from './errors';
 import { fill, pct } from './format';
+import { cleanDetails } from './problems';
 
 export type Look = 'idle' | 'on' | 'busy' | 'busy-dim' | 'off';
 
@@ -71,7 +72,7 @@ export function buttonModel(s: HomeInput): ButtonModel {
  */
 export function startDetails(engineDown: boolean, startError: { details?: string } | null): string | null {
   if (!engineDown) return null;
-  const d = startError?.details?.trim();
+  const d = cleanDetails(startError?.details);
   return d ? d : null;
 }
 

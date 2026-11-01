@@ -66,6 +66,7 @@ The one-button screen.
 | Three path cards | Everyday / Blocked / Picky with the domain count and today's traffic for each; Proxy / Blocked-by-you cards appear only when non-empty | `Snapshot.Routes`, `Snapshot.Traffic` |
 | Savings line | "78% of your traffic stays off the detour" | `Snapshot.Savings` |
 | Network line | "Network: Home Wi-Fi (Example ISP) · checked 5 min ago" | `Snapshot.Network`, `LastCheck` |
+| Problem banners | one warning banner per problem, above the path cards, with no close button: it stays while the engine reports the problem. Words: "The quiet fix could not start. Picky sites may not open." (`desync_failed`), "The detour stopped working. Blocked sites may not open." (`tunnel_engine_failed`); an unknown code shows the engine's `Message` and nothing else. A collapsed **Details** box (the engine's sanitized text, capped again by the UI at 4000 characters, control characters removed) with **Copy**, and **Restart engine**. Shown at once, hidden 1.5 s after the engine stops reporting it, so a restart that clears and re-raises the problem does not flicker. The app-shell status line says "On, with a problem" and Activity → Warnings lists the same entries first | `Snapshot.Problems` |
 | Warning banner | the first warning with a **Details** link; hidden when there are none | `Snapshot.Warnings` |
 | Detour card | shown while no server is in use, never blocks **Start**. Off: "Add a detour server. You can start without one..." with **Add server**. On without a server (`Snapshot.Tunnel == "none"`): "Running without a detour server. Blocked sites stay unavailable until you add one." with **Add server**. A server saved but not in use: "Pick the server to use" with **Make active** | `Snapshot.Tunnel`, `GET /servers` |
 | Blocked card caveat | while `Tunnel == "none"` the Blocked card has a muted line: "No detour server yet: these sites open directly and may not load." | `Snapshot.Tunnel` |
@@ -240,6 +241,10 @@ Notifications (OS toasts, can be turned off in General): connected, disconnected
 | servers list, add, make active, remove, offline test | `GET/POST /api/v1/servers`, `POST /api/v1/servers/{id}/activate`, `DELETE /api/v1/servers/{id}`, `POST /api/v1/servers/test` (milestone 4; no event kind, refetch the list after each call) |
 
 The web frontend calls Tauri commands only; the Rust side is the only API client and holds the token (ADR 0003, decision 4).
+
+### Decisions (dated)
+
+- **2026-11-01, problems are always visible.** The engine reports `snapshot.Problems` (`api/desktop/API.md` decision 44) while the connection stays up. The UI shows each as a warning banner on Home (no network words; the desync program is "the quiet fix"), mirrors the count in the status line and on Activity → Warnings, and never trusts the engine's text blindly (known codes use the app's own sentence; unknown codes show `Message` only and no details; details are capped and cleaned again). Hiding is debounced by 1.5 s. No tray exists yet, so nothing else mirrors it.
 
 ## 12. Open questions
 
