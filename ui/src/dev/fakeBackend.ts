@@ -115,7 +115,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
   const speed = opts.speed ?? 1;
   const trafficOn = opts.traffic ?? speed > 0;
   let scenario: Scenario = opts.scenario ?? 'normal';
-  const flags: Record<DevFlag, boolean> = { warnings: false, extras: false, learning: false, reloadFails: false };
+  const flags: Record<DevFlag, boolean> = { warnings: false, extras: false, learning: false, unidentified: false, reloadFails: false };
 
   let state: ConnState = 'disconnected';
   let error: EngineErrorBody | null = null;
@@ -258,9 +258,9 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     return {
       Version: 'splitter fake',
       State: state,
-      Network: flags.learning ? 'unknown network' : network,
-      LastCheck: flags.learning ? ZERO_TIME : lastCheck,
-      NextCheck: flags.learning ? ZERO_TIME : new Date(Date.now() + 12 * 60000).toISOString(),
+      Network: flags.learning || flags.unidentified ? 'unknown network' : network,
+      LastCheck: flags.learning || flags.unidentified ? ZERO_TIME : lastCheck,
+      NextCheck: flags.learning || flags.unidentified ? ZERO_TIME : new Date(Date.now() + 12 * 60000).toISOString(),
       Routes: counts,
       Traffic: { ...sent },
       Savings: total > 0 ? (sent.direct! + sent.desync!) / total : 0,
@@ -354,7 +354,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
         emitState();
         emit({ kind: 'routes', data: { changes: [] } });
       }
-      if (key === 'warnings') emitState();
+      if (key === 'warnings' || key === 'unidentified') emitState();
     },
     flags: () => ({ ...flags }),
   };

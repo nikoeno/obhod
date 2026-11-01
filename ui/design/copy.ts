@@ -41,6 +41,7 @@ export const errors: Record<string, { sentence: string; action: ErrorAction }> =
   already_running: { sentence: 'Obhod is already running.', action: 'none' },
   port_busy: { sentence: "Another program is using the app's port.", action: 'restart-engine' },
   tunnel_missing: { sentence: 'The detour server is not set up or cannot be reached.', action: 'detour' },
+  program_missing: { sentence: 'A required program is missing next to the app. Reinstall the app.', action: 'log' },
   connect_failed: { sentence: 'Could not connect. See the engine log for details.', action: 'log' },
   crashed: { sentence: 'The connection stopped unexpectedly.', action: 'log' },
   engine_unreachable: { sentence: 'The engine is not running.', action: 'restart-engine' },

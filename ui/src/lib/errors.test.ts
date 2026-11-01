@@ -9,6 +9,7 @@ describe('errorInfo', () => {
       needs_setup: 'setup',
       tunnel_missing: 'detour',
       crashed: 'log',
+      program_missing: 'log',
       connect_failed: 'log',
       engine_unreachable: 'restart-engine',
     };
@@ -17,6 +18,14 @@ describe('errorInfo', () => {
       expect(i.sentence).toBe(errors[code]!.sentence);
       expect(i.action).toBe(action);
     }
+  });
+
+  it('program_missing shows its own sentence, also while connected, never the generic one', () => {
+    const i = errorInfo({ code: 'program_missing', error: 'x' }, 'disconnected')!;
+    expect(i.sentence).toBe('A required program is missing next to the app. Reinstall the app.');
+    expect(i.sentence).not.toBe(errors.connect_failed!.sentence);
+    expect(i.action).toBe('log');
+    expect(errorInfo({ code: 'program_missing' }, 'connected')!.sentence).toBe(i.sentence);
   });
 
   it('keeps the commands of needs_setup', () => {

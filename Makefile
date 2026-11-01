@@ -4,7 +4,7 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null)
 LDFLAGS := -X $(MODULE)/internal/lib/version.Version=$(VERSION) -X $(MODULE)/internal/lib/version.Commit=$(COMMIT)
 CMDS    := $(notdir $(wildcard cmd/*))
 
-.PHONY: build test test-lab arch vet lint cross clean fetch fetch-check e2e lab-clean
+.PHONY: build test test-lab arch vet lint cross clean fetch fetch-check app e2e lab-clean
 
 build:
 	@mkdir -p bin
@@ -38,6 +38,11 @@ fetch:
 # Verify installed third-party binaries without network access.
 fetch-check:
 	go run ./scripts/fetch -check
+
+# Windows app folder dist/app: splitter.exe, the Tauri app and the pinned programs next to them
+# (the list is scripts/app-files.txt). Run `make fetch` for windows-amd64 first. Windows only.
+app:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-app.ps1
 
 clean:
 	rm -rf bin dist

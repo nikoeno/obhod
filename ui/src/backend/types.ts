@@ -118,7 +118,7 @@ export class BackendError extends Error {
 
 /** Scenarios of the dev-only fake backend. */
 export type Scenario = 'normal' | 'no-server' | 'tunnel-missing' | 'permission-denied' | 'needs-setup' | 'crash' | 'engine-unreachable';
-export type DevFlag = 'warnings' | 'extras' | 'learning' | 'reloadFails';
+export type DevFlag = 'warnings' | 'extras' | 'learning' | 'unidentified' | 'reloadFails';
 
 /** Dev-only controls; only the fake backend provides them. */
 export interface DevControls {

@@ -29,7 +29,7 @@ Vue 3 frontend (webview)  --invoke / events-->  Rust (src-tauri)  --HTTP + beare
 | Command | What |
 |---|---|
 | `npm ci` | reproducible install from `package-lock.json` |
-| `npm run dev` | Vite dev server on http://127.0.0.1:1420 in a plain browser, with the **fake backend** (no Rust, no engine, no other server to start). `Ctrl+Shift+D` opens the scenario panel: scenarios (normal, no-server (Start works without a server), tunnel-missing (Start fails), permission-denied, needs-setup, crash, engine-unreachable) and data switches (warnings, proxy and blocked-by-you sites, still learning, a failing server switch). Every page reads from it, so each one can be checked in every scenario |
+| `npm run dev` | Vite dev server on http://127.0.0.1:1420 in a plain browser, with the **fake backend** (no Rust, no engine, no other server to start). `Ctrl+Shift+D` opens the scenario panel: scenarios (normal, no-server (Start works without a server), tunnel-missing (Start fails), permission-denied, needs-setup, crash, engine-unreachable) and data switches (warnings, proxy and blocked-by-you sites, still learning, first run with the network not identified yet, a failing server switch). Every page reads from it, so each one can be checked in every scenario |
 | `npm run typecheck` | `vue-tsc --noEmit` |
 | `npm test` | vitest (store, error mapping, view models of Home / Sites / Activity / Help, per-site rules (input cleaning, errors, dialog model), server dialog logic, mocked invoke layer, source rules, icon sync) |
 | `npm run build` | typecheck + production web build into `dist/` (no fake backend inside) |
@@ -63,6 +63,16 @@ $env:OBHOD_SPLITTER = "$PWD\bin\splitter.exe"; npm --prefix ui run tauri:dev
 | `src/styles/app.css` | component CSS on top of `design/tokens.css` |
 | `src-tauri/src/` | `token`, `http` (loopback HTTP client), `sse` (parser + reconnecting reader), `client` (typed endpoints, error mapping), `launcher` (`Launcher` trait, ShellExecute/pkexec), `engine` (start, ready, stop), `commands` (Tauri commands: engine, `api_*`, `servers_*`, `sites_list` / `site_set` / `site_delete`) |
 | `src-tauri/capabilities/default.json` | the webview may only listen to events |
+
+## First-run regression tests
+
+A first run once showed an empty Sites page (and "still learning") although the engine listed the sites. These tests keep the UI side honest (`npm test`):
+
+| Test | Guards |
+|---|---|
+| `src/lib/sitesModel.test.ts` "listView, first-run regression" | `listView` never returns `learning` when there are sites (any combination of `engineDown`, `learning`, `loaded`, `total`, `shown`, `query`), and returns it only for an empty table. |
+| `src/store.test.ts` "first run (network not identified yet)" | With the fake's **First run: network not identified, sites listed** switch (`unidentified`, network "unknown network", rows present) the store has rows, the Sites list view is `list`, and identifying the network later keeps them. |
+| `src/lib/errors.test.ts` | `program_missing` (a helper program is missing next to the app) shows its own sentence and **Show engine log**, never the generic "Could not connect". |
 
 ## Not done yet
 

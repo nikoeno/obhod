@@ -530,7 +530,9 @@ func (a *App) Connect(ctx context.Context) error {
 	a.setState(StateConnecting)
 	if err := a.connectLocked(ctx); err != nil {
 		if ctx.Err() == nil { // a connect cancelled by the caller or by shutdown is no error
-			a.setLastError(Classify(err), false) // the disconnected event below carries it
+			oe := Classify(err)
+			a.log.Warn("connect failed", "code", oe.Code, "err", err) // the error text (it may name a missing program) stays in the log
+			a.setLastError(oe, false)                                 // the disconnected event below carries it
 		}
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*stepTimeout)
 		defer cancel()
@@ -579,7 +581,7 @@ func (a *App) connectLocked(ctx context.Context) error {
 	table := a.currentTable()
 	bins, err := a.resolveBinaries()
 	if err != nil {
-		return fail(ExitConfig, "%v", err)
+		return fail(ExitConfig, "%w", err)
 	}
 	a.resolveTunnel(ctx)
 	r, err := a.render(ctx, bins, table, true)
@@ -916,7 +918,7 @@ func (a *App) resolveBinaries() (binaries, error) {
 	if b.singBox == "" {
 		sb, err := a.d.findBinary("sing-box", a.cfg.SingBox.Binary)
 		if err != nil {
-			return binaries{}, err
+			return binaries{}, fmt.Errorf("%w: %v", errProgramMissing, err)
 		}
 		b.singBox = sb
 	}

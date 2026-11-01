@@ -52,6 +52,28 @@ describe('filterSites', () => {
   });
 });
 
+describe('listView, first-run regression', () => {
+  // The Sites list once hid a non-empty list behind "still learning" while the network was unidentified.
+  it('never says learning (or anything but down/list/no-match/none-on-path) when there are sites', () => {
+    const bools = [false, true];
+    const queries = ['', '   ', 'zz'];
+    let n = 0;
+    for (const engineDown of bools) for (const learning of bools) for (const loaded of bools)
+      for (const total of [0, 1, 5, 140]) for (const shown of [0, 1, 5, 140]) for (const query of queries) {
+        if (shown > total) continue;
+        n++;
+        const v = listView({ engineDown, learning, loaded, total, shown, query });
+        if (total > 0 && !engineDown) {
+          expect(v, JSON.stringify({ learning, loaded, total, shown, query })).not.toBe('learning');
+          expect(v).toBe(shown > 0 ? 'list' : query.trim() ? 'no-match' : 'none-on-path');
+        }
+        if (engineDown) expect(v).toBe('down');
+        if (total === 0 && !engineDown && (learning || loaded)) expect(v).toBe('learning');
+      }
+    expect(n).toBeGreaterThan(100);
+  });
+});
+
 describe('listView and texts', () => {
   const base = { engineDown: false, learning: false, loaded: true, total: 4, shown: 4, query: '' };
   it('picks the right state', () => {

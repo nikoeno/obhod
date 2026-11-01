@@ -76,7 +76,7 @@ func (a *App) buildPlan(ctx context.Context, b binaries, t route.Table) (desync.
 		dcfg.ExcludeIPs = []netip.Prefix{noTunnelExclude}
 	}
 	if b.desync == "" {
-		return desync.Plan{}, fail(ExitConfig, "the desync engine binary was not found; set desync.binary or put it next to the executable")
+		return desync.Plan{}, fail(ExitConfig, "%w: the desync engine binary was not found; set desync.binary or put it next to the executable", errProgramMissing)
 	}
 	up, err := a.d.uplink(ctx)
 	if err != nil {

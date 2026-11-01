@@ -588,6 +588,7 @@ func TestStateErrorGoldens(t *testing.T) {
 		{Code: pc.CodePermissionDenied, Message: "The app needs permission to change how traffic is routed."},
 		{Code: pc.CodeNeedsSetup, Message: "One-time setup is needed on this computer.", Commands: []string{"nft add table inet splitter", "ip rule add fwmark 0x40000000/0x40000000 lookup main priority 8999"}},
 		{Code: pc.CodeTunnelMissing, Message: "The detour server is not set up or cannot be reached."},
+		{Code: pc.CodeProgramMissing, Message: "A required program is missing next to the app. Reinstall the app."},
 		{Code: pc.CodeCrashed, Message: "The connection stopped unexpectedly."},
 		{Code: pc.CodeConnectFailed, Message: "Could not connect. See the engine log for details."},
 	} {

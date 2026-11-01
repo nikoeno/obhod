@@ -134,7 +134,7 @@ func (a *App) CheckNow(domains ...string) error {
 
 // OpError describes a failed or interrupted transition for the UI.
 type OpError struct {
-	Code     string   // permission_denied | needs_setup | tunnel_missing | crashed | connect_failed
+	Code     string   // permission_denied | needs_setup | tunnel_missing | program_missing | crashed | connect_failed
 	Message  string   // a fixed sentence: no addresses, paths or secrets
 	Commands []string // needs_setup only: what the human has to run; the app never runs them
 }
@@ -144,6 +144,7 @@ const (
 	CodePermissionDenied = "permission_denied"
 	CodeNeedsSetup       = "needs_setup"
 	CodeTunnelMissing    = "tunnel_missing"
+	CodeProgramMissing   = "program_missing"
 	CodeCrashed          = "crashed"
 	CodeConnectFailed    = "connect_failed"
 )
@@ -186,6 +187,8 @@ func Classify(err error) *OpError {
 		return &OpError{Code: CodePermissionDenied, Message: "The app needs permission to change how traffic is routed."}
 	case errors.Is(err, errTunnelUnresolved), errors.Is(err, singbox.ErrNoTunnel):
 		return &OpError{Code: CodeTunnelMissing, Message: "The detour server is not set up or cannot be reached."}
+	case errors.Is(err, errProgramMissing):
+		return &OpError{Code: CodeProgramMissing, Message: "A required program is missing next to the app. Reinstall the app."}
 	}
 	return &OpError{Code: CodeConnectFailed, Message: "Could not connect. See the engine log for details."}
 }
@@ -193,6 +196,10 @@ func Classify(err error) *OpError {
 func crashedError() *OpError {
 	return &OpError{Code: CodeCrashed, Message: "The connection stopped unexpectedly."}
 }
+
+// errProgramMissing marks a helper program (sing-box, or the desync engine when some site needs it) that
+// cannot be found. Its text names the program for the log; Classify turns it into a fixed sentence.
+var errProgramMissing = errors.New("required program not found")
 
 // Log names accepted by Logs.
 const (

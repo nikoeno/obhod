@@ -213,6 +213,7 @@ Notifications (OS toasts, can be turned off in General): connected, disconnected
 | Linux `inet splitter` table missing (exit 2 with commands) | "One-time setup is needed on this computer." | dialog with the exact commands and a **Copy** button; the UI never runs them itself |
 | Second instance (exit 3) | "Obhod is already running." | bring the existing window to front |
 | Status/control port busy (exit 1) | "Another program is using the app's port." | Restart engine; link to Help |
+| `program_missing` (sing-box, or the desync engine a site needs, is not next to the app) | "A required program is missing next to the app. Reinstall the app." | **Show engine log** (the log names the program) |
 | Tunnel server missing / unresolved | "The detour server is not set up or cannot be reached." | Settings → Detour server |
 | `invalid_input` (server call) | The engine's own sentence, for example "The link has no port." (fixed sentences, never a value from the input) | fix the pasted text |
 | `unsupported_protocol` | "This kind of server is not supported." (the engine's sentence names the part: protocol, transport, cipher) | ask the provider for another link |

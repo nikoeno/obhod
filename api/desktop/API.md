@@ -150,6 +150,7 @@ These codes are not HTTP errors: they appear in `state.error` (and the `state` e
 | `permission_denied` | the app lacks the rights to change routing | `procman.ErrNeedsAdmin`, exit 2 without commands |
 | `needs_setup` | one-time manual setup needed; `commands` lists them (never run by the app) | Linux `inet splitter` table / `ip rule` check, exit 2 with commands |
 | `tunnel_missing` | a detour server is in use but cannot be used: its host name did not resolve (and desync domains need its address) | resolve error, exit 1. **No server in use at all is not an error since 2026-11-01** (degraded mode, decision 34); a tunnel file that exists but is not valid still stops the start of `splitter` (exit 1) |
+| `program_missing` | a required helper program (sing-box, or the desync engine when some site needs it) is not next to the app (additive, 2026-11-01). The sentence is fixed ("A required program is missing next to the app. Reinstall the app."), no path; the log line `connect failed` names the program | `errProgramMissing` from `resolveBinaries` / the desync plan, exit 1 |
 | `crashed` | sing-box gave up while connected; the app is now disconnected | sing-box lost path |
 | `connect_failed` | any other connect failure | other errors |
 
@@ -312,6 +313,22 @@ The read-only status page (`internal/pc/status`, `status.listen`) is **kept alon
 8. `shutdown` ends every stream with a final `shutdown` event, and the server returns after the response is flushed.
 9. Golden JSON in `testdata/` (updated only with `-update`) for each GET: `state` (several states), `routes` (empty and filled), `processes`, `logs` (all three names), `version`; nil slices appear as `[]`.
 10. Error bodies: each code in the error tables has a golden body; none contains a secret marker planted in the fake's errors.
+
+## First-run regression tests
+
+Five first-run failures on a real Windows machine got past tests that covered the pieces with fakes. These tests run the real first-run path; all of them run in `go test ./...` (no network, no admin). What each one guards:
+
+| Test | Guards |
+|---|---|
+| `api/desktop` `TestFirstRunEndToEnd` | `run --ui` from empty directories creates `app.yaml` and the starter lists; the engine gets a config whose lists exist, load with the real `lists` package and give >= 100 candidates; a real `pc.New` (real checker, real store) accepts that config. (Missing `app.yaml` at start; Sites empty because the lists were not referenced.) |
+| `internal/pc` `TestFirstRunDefaultConfigRoutesAndProbes` | A real `pc.App` on the real default config (the YAML text is read from `defaultconfig.go`, the lists from `defaultlists/`) with the real checker: with the network still unknown the table and `Routes()` already have >= 100 entries and nothing is probed; `Connect` with no detour server succeeds (no `tunnel_missing`, degraded flags set); once the network is known one check probes all candidates, decisions reach `Routes()`, and `CheckNow()` probes again. Only sing-box, the desync engine, the status server and the prober (a counting runner) are fakes. |
+| `internal/pc` `TestFirstRunRealNetworkIdentificationProbes` | The same with the real netwatch and the real `netif.Uplink` of the machine: the network becomes known with a `local:` or `gw:` ID (no echo endpoint, so no network access) and the first check probes. Skipped when the machine has no uplink with a default gateway. (No network ID on Windows, so no site was ever probed.) |
+| `internal/pc` `TestConnectMissingProgramIsSpecific`, `TestClassifyProgramMissing` | A missing sing-box, or a missing desync engine that a site needs, ends `Connect` with `program_missing` and its fixed sentence (no path in it), sing-box is not started, and the log line `connect failed` names the cause; a missing desync engine is no problem when no site uses it. (Generic `connect_failed` with only a log hint.) |
+| `api/desktop` `TestStateErrorGoldens` | The `program_missing` state body (golden). |
+| `internal/lib/checker/netwatch` `TestOfflineFactsIdentifyTheNetwork`, `TestRealOSUplinkIsIdentified` | Each set of offline OS facts (Windows: adapter and gateway IP only; Linux: gateway MAC; Wi-Fi: SSID) gives a known network with the right ID kind, and nothing but "truly nothing" gives an unknown one; plus the real OS check above. No build tag: identification makes no network call. |
+| `scripts/fetch` `TestAppFilesListMatchesManifest`, `TestBuildScriptAndMakefileUseTheList` | `scripts/app-files.txt` (the single list copied next to `splitter.exe` by `scripts/build-app.ps1`, `make app`) equals the `windows-amd64` files of `third_party/manifest.yaml`, and the script and the Makefile use it. (Helper programs missing from the app folder.) |
+
+Not automatic: that the Windows app folder really starts (UAC, WinDivert, the Wintun adapter) and `scripts/build-app.ps1` itself (a human runs `make app`; `-SkipBuild` assembles and checks only the pinned files). A `app.yaml` from an older version that has no `checker.lists` is still read as is (an empty Sites list); only a missing file is replaced.
 
 ## Implementation notes
 

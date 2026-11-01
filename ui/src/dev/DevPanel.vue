@@ -21,12 +21,13 @@ const SCENARIOS: Array<[Scenario, string]> = [
 const FLAGS: Array<[DevFlag, string]> = [
   ['warnings', 'Warnings'],
   ['extras', 'Proxy and blocked-by-you sites'],
-  ['learning', 'Still learning (no network yet)'],
+  ['learning', 'Still learning (no network yet, empty list)'],
+  ['unidentified', 'First run: network not identified, sites listed'],
   ['reloadFails', 'Switching server while On fails'],
 ];
 
 const scenario = ref<Scenario>(dev?.scenario() ?? 'normal');
-const flags = reactive<Record<DevFlag, boolean>>(dev?.flags() ?? { warnings: false, extras: false, learning: false, reloadFails: false });
+const flags = reactive<Record<DevFlag, boolean>>(dev?.flags() ?? { warnings: false, extras: false, learning: false, unidentified: false, reloadFails: false });
 
 function pick(s: Scenario): void {
   scenario.value = s;

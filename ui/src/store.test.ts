@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BackendError, type EngineEvent } from './backend/types';
+import { isLearning } from './lib/errors';
+import { filterSites, listView } from './lib/sitesModel';
 import { flush, makeStore, until } from './test/helpers';
 
 describe('store with the fake backend', () => {
@@ -352,6 +354,27 @@ describe('data behind Sites, Activity and Help', () => {
     await store.refresh();
     expect(store.S.routes).toEqual([]);
     expect(store.S.snapshot!.Network).toBe('unknown network');
+  });
+
+  it('first run (network not identified yet): the sites are listed, not "still learning"', async () => {
+    const { store, backend } = makeStore();
+    backend.dev!.setFlag('unidentified', true);
+    await store.init();
+    expect(store.S.snapshot!.Network).toBe('unknown network');
+    expect(isLearning(store.S.snapshot!.Network)).toBe(true);
+    expect(store.S.routes.length).toBeGreaterThan(5);
+    // What Sites.vue computes from the store: with rows present the list view is shown, whatever the network.
+    const view = listView({
+      engineDown: store.S.engineDown, learning: isLearning(store.S.snapshot?.Network), loaded: store.S.loaded,
+      total: store.S.routes.length, shown: filterSites(store.S.routes, 'all', '').length, query: '',
+    });
+    expect(view).toBe('list');
+    expect(filterSites(store.S.routes, 'all', '').length).toBe(store.S.routes.length);
+    // Identified later: same rows, label shown.
+    backend.dev!.setFlag('unidentified', false);
+    await store.refresh();
+    expect(isLearning(store.S.snapshot!.Network)).toBe(false);
+    expect(store.S.routes.length).toBeGreaterThan(5);
   });
 
   it('a crash shows the sing-box process as failed with its logs', async () => {
