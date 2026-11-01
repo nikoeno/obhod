@@ -216,12 +216,13 @@ func TestSNISwapAlertMeansSNIBlock(t *testing.T) {
 	}
 }
 
-// The neutral SNI failing the same way as the real one is a genuine IP block: tunnel, not confirmed.
+// The neutral SNI failing the same way as the real one is not confirmed as an SNI block, but since
+// 2026-11-01 the suggestion is still desync: only a failure at TCP connect suggests the tunnel.
 func TestSNISwapSameFailureMeansIPBlock(t *testing.T) {
 	d := dialer.NewFake("direct", dialer.Step{Conn: resetServer(t)}, dialer.Step{Conn: resetServer(t)})
 	r := testProber(t, nil, nil).Probe(context.Background(), testTarget, d, withSwap(testOpts(StageTCP|StageTLS)))
 	applySuggestion(&r, Calibration{Internet: CheckOK})
-	if r.Blocking != verdict.BlockingLikely || r.Suggestion != route.Tunnel {
+	if r.Blocking != verdict.BlockingLikely || r.Suggestion != route.Desync {
 		t.Fatalf("%s %q", r.Blocking, r.Suggestion)
 	}
 }

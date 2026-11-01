@@ -291,6 +291,7 @@ var allPaths = []struct{ method, path string }{
 	{"GET", "/api/v1/servers"}, {"POST", "/api/v1/servers"}, {"POST", "/api/v1/servers/test"},
 	{"POST", "/api/v1/servers/0000000000000001/activate"}, {"DELETE", "/api/v1/servers/0000000000000001"},
 	{"GET", "/api/v1/sites"}, {"POST", "/api/v1/sites"}, {"DELETE", "/api/v1/sites/example.com"},
+	{"GET", "/api/v1/desync"}, {"POST", "/api/v1/desync"}, {"POST", "/api/v1/desync/search"}, {"GET", "/api/v1/desync/presets"},
 }
 
 // ---- auth, Host, headers ----

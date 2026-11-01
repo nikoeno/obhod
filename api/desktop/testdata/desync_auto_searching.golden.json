@@ -1,0 +1,22 @@
+{
+  "mode": "auto",
+  "preset": "alt3-hostfakesplit",
+  "searching": true,
+  "lastSearch": {
+    "at": "2026-10-31T12:05:00Z",
+    "tried": [
+      {
+        "preset": "alt2-multisplit",
+        "fixed": 0,
+        "total": 3
+      },
+      {
+        "preset": "alt3-hostfakesplit",
+        "fixed": 3,
+        "total": 3
+      }
+    ],
+    "chosen": "alt3-hostfakesplit",
+    "outcome": "chosen"
+  }
+}

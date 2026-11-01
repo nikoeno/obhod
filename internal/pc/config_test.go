@@ -103,6 +103,20 @@ func TestDesyncPresetSelection(t *testing.T) {
 	}
 }
 
+// desync.preset: auto is valid since 2026-11-01 (stage 2); the search tuning has hard caps.
+func TestPresetAutoIsValid(t *testing.T) {
+	cfg, err := LoadConfig(filepath.Join("testdata", "preset_auto.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Desync.Preset != desync.PresetAuto || cfg.DesyncAuto.MaxPresets != 4 || cfg.DesyncAuto.Concurrency != 1 {
+		t.Fatalf("%+v %+v", cfg.Desync, cfg.DesyncAuto)
+	}
+	if def := DefaultConfig().DesyncAuto; def.Concurrency > 2 || def.MaxPresets != 6 {
+		t.Fatalf("defaults %+v", def)
+	}
+}
+
 func TestAbsoluteListPathsStay(t *testing.T) {
 	abs, err := filepath.Abs(filepath.Join("some", "dir", "list.txt"))
 	if err != nil {
@@ -121,19 +135,20 @@ func TestAbsoluteListPathsStay(t *testing.T) {
 
 func TestLoadRejects(t *testing.T) {
 	cases := map[string]string{
-		"unknown_key":          "bogus",
-		"duration":             "time.Duration",
-		"secret_in_config":     "clashsecret",
-		"secret_name":          "secrets.tunnel",
-		"non_loopback_status":  "loopback",
-		"unknown_default":      "unknowndefault",
-		"log_level":            "log.level",
-		"salt_set":             "salt",
-		"unknown_engine":       "desync.engine",
-		"unknown_preset":       "unknown preset",
-		"preset_auto":          "not available yet",
-		"preset_with_strategy": "strategy is used only with preset",
-		"preset_with_ports":    "ports is used only with preset",
+		"unknown_key":               "bogus",
+		"duration":                  "time.Duration",
+		"secret_in_config":          "clashsecret",
+		"secret_name":               "secrets.tunnel",
+		"non_loopback_status":       "loopback",
+		"unknown_default":           "unknowndefault",
+		"log_level":                 "log.level",
+		"salt_set":                  "salt",
+		"unknown_engine":            "desync.engine",
+		"unknown_preset":            "unknown preset",
+		"preset_auto_with_strategy": "refuses strategy",
+		"desync_auto_concurrency":   "concurrency",
+		"preset_with_strategy":      "strategy is used only with preset",
+		"preset_with_ports":         "ports is used only with preset",
 	}
 	for name, want := range cases {
 		t.Run(name, func(t *testing.T) {

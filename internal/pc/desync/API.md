@@ -31,7 +31,7 @@ const (
 type Config struct {
     Engine       Engine   // default by GOOS
     Binary       string
-    Preset       string   // catalogue id, "custom" (use Strategy) or "auto" (reserved); "" = custom if Strategy is set, else DefaultPreset
+    Preset       string   // catalogue id, "custom" (use Strategy) or "auto" (resolved by the caller, see below); "" = custom if Strategy is set, else DefaultPreset
     Strategy     []string // zapret2 profile args (e.g. --filter-l7=tls --payload=tls_client_hello --lua-desync=...); only with preset custom
     LuaInit      []string // Lua libraries to load; default zapret-lib.lua, zapret-antidpi.lua
     ExcludeIPs   []netip.Prefix // VPS IP(s); required
@@ -80,7 +80,7 @@ A preset is a named, ready-made strategy: an ordered list of profiles (a match o
 ```go
 const (
     PresetCustom  = "custom"          // use Config.Strategy
-    PresetAuto    = "auto"            // reserved; Check refuses it ("not available yet")
+    PresetAuto    = "auto"            // chosen by internal/pc per network; Check still refuses it: the caller resolves it to a catalogue id before Build
     DefaultPreset = "alt2-multisplit" // when Preset and Strategy are both empty
     FakeDir       = "fake"            // folder next to the engine binary that holds the fake payloads
 )
@@ -114,9 +114,9 @@ Behavior:
 - Payloads: a call names a payload as `{fake_tls_google}` (catalogue, resolved to a file in `FakeDir` next to `Config.Binary`, rendered as `--blob=fake_tls_google:@<dir>/tls_clienthello_www_google_com.bin`) or `{fake_default_tls}` / `fake_default_http` / `fake_default_quic` (built into the engine; no file). Nothing else can be a blob name: a path, an `@file` or an unknown name makes the preset not render, and config never supplies blob names or paths. `Plan.Requires` lists the files (sorted, slash-separated); the renderers do not read the disk (pure); `internal/pc` checks them at connect and reports a missing one as `program_missing`.
 - An empty desync list still gives `Plan{Engine}` (no `Requires`): nothing is checked or started.
 
-## Planned: automatic selection (not implemented)
+## Automatic selection (implemented 2026-11-01 in `internal/pc`, stage 2 of 3)
 
-`desync.preset: auto` is reserved. Stage 2 runs the presets in turn against the domains that fail direct, with the engine started on the physical path and the existing direct probes measuring the effect, keeps the first or best that works and stores the choice per network; stage 3 adds a picker and an "Automatic" entry to the Settings page. Details and the constraints (admin, the Linux nft table covers the same ports for every preset) are in `PRESETS.md`, "Planned: automatic selection".
+`desync.preset: auto` is valid in `app.yaml` (`pc.Config.Validate` accepts it, with the same refusal of `strategy` and `ports` as for a named preset), but **this module does not know it**: `Config.Check` and `Build` still refuse `auto` ("not available yet"), because the choice is a per-network fact kept by the app. `internal/pc` resolves `auto` to a catalogue id (the one stored for the network by a search, else `DefaultPreset`) before it builds a plan, and `internal/pc/autodesync` runs the search. Nothing in the public API of this module changed. Stage 3 adds a picker and an "Automatic" entry to the Settings page. How the search works and its limits: `internal/pc/API.md` ("Desync presets: automatic selection"), `internal/pc/autodesync/API.md` and `PRESETS.md`, "Automatic selection".
 
 ## Config
 
@@ -132,7 +132,7 @@ Delegation to children, exclusion enforcement, empty-list behavior.
 
 ## Out of scope
 
-Choosing a preset automatically (planned, see above), running processes.
+Choosing a preset automatically (`internal/pc/autodesync` and `internal/pc`), running processes.
 
 ## Bootstrap (M0)
 

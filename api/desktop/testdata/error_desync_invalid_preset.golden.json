@@ -1,0 +1,4 @@
+{
+  "error": "That is not a desync preset. Use auto or an id from the preset list.",
+  "code": "invalid_input"
+}

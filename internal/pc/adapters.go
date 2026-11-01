@@ -70,6 +70,9 @@ func (w *watchedClash) down() bool {
 // failureSink feeds a monitor failure to the checker's failure threshold.
 func (a *App) failureSink() func(monitor.Failure) {
 	return func(f monitor.Failure) {
+		if f.Route == route.Desync {
+			a.noteLiveFailure(f.Domain, f.At)
+		}
 		a.d.checker.ReportFailure(checker.Failure{Domain: f.Domain, Route: f.Route, Verdict: f.Verdict, At: f.At})
 	}
 }
@@ -95,6 +98,7 @@ func (s *statusSource) Snapshot() status.Snapshot {
 	for r, n := range st.Counts {
 		snap.Routes[r] = n
 	}
+	a.adjustCounts(snap.Routes) // sites no desync preset reaches count as tunnel
 	for _, p := range a.d.procs.Status() {
 		snap.Processes = append(snap.Processes, status.Process{Name: p.Name, State: string(p.State), Restarts: p.Restarts})
 	}

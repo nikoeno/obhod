@@ -38,6 +38,12 @@ type engine interface {
 	Sites() ([]pc.SiteRule, error)
 	SetSite(domain, action string) (rule pc.SiteRule, created bool, err error)
 	DeleteSite(domain string) error
+
+	// Desync presets (2026-11-01): the choice, the catalogue and the automatic search.
+	Desync() pc.DesyncStatus
+	DesyncPresets() []pc.DesyncPreset
+	SetDesync(ctx context.Context, preset string) error
+	StartDesyncSearch() error
 }
 
 var _ engine = (*pc.App)(nil)

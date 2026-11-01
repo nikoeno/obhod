@@ -48,7 +48,8 @@ checker:
 # put on the desync route; it never touches the detour server or this app's tunnel.
 #   preset: <name>   one of the names below
 #   preset: custom   use the "strategy" list (raw zapret2 arguments, for experts)
-#   preset: auto     reserved for "pick the best preset automatically"; not available yet
+#   preset: auto     try the presets one by one on the sites that need it and remember the one that
+#                    works on this network (tuning: desync_auto, see the docs)
 # The default alt2-multisplit sends no fake packets (it only splits the first packet
 # of a connection), so it is the gentlest one; it worked best on Russian networks.
 # If a site stays blocked, try another name. All names: alt2-multisplit, alt3-hostfakesplit,

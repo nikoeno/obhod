@@ -34,6 +34,7 @@ type fakeEngine struct {
 	logsErr  error
 	srv      srvState
 	site     siteState
+	desy     desyncState
 
 	// connectHook runs inside Connect (state connecting) and decides its result.
 	connectHook func(ctx context.Context) error

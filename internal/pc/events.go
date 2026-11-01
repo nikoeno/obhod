@@ -20,6 +20,7 @@ const (
 	EventRoutes  EventKind = "routes"  // the route table changed
 	EventCheck   EventKind = "check"   // a check started or ended
 	EventTraffic EventKind = "traffic" // the traffic tick while connected
+	EventDesync  EventKind = "desync"  // a desync preset search: started, trying a preset, ended (added 2026-11-01)
 )
 
 // Event is one notification for Subscribe. Only the field of its Kind is set.
@@ -28,6 +29,7 @@ type Event struct {
 	Changes []status.Change // routes
 	Check   CheckEvent      // check
 	Traffic TrafficTick     // traffic
+	Desync  DesyncEvent     // desync
 }
 
 // CheckEvent is the payload of a check event.

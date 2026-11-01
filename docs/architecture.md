@@ -36,6 +36,7 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
       - `internal/pc/desync/nfqws`: renders nfqws2 (zapret2) arguments, hostlist and nftables rules
       - `internal/pc/desync/winws`: renders winws2 (zapret2, WinDivert) arguments and hostlist
       - `internal/pc/lib/clashapi`: a minimal client for sing-box's Clash-compatible API
+    - `internal/pc/autodesync`: searches the desync presets for the one that fixes the blocked sites of a network, and remembers the winner per network
     - `internal/pc/monitor`: watches live connections via the Clash API, detects failures and counts traffic per route
     - `internal/pc/procman`: starts, stops, restarts and supervises child processes that die with the parent
     - `internal/pc/servers`: parses, validates, stores and activates tunnel servers (share links and raw sing-box outbound JSON)
@@ -69,7 +70,7 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 | `internal/lib/checker/netwatch` | child | internal/lib/checker | – | implemented |
 | `internal/lib/checker/schedule` | child | internal/lib/checker | – | implemented |
 | `internal/lib/checker/store` | child | internal/lib/checker | – | implemented |
-| `internal/lib/clock` | lib | internal/lib/analyzer, internal/lib/checker, internal/lib/checker/netwatch, internal/lib/checker/schedule, internal/lib/checker/store, internal/pc, internal/pc/monitor, internal/pc/procman, internal/router | – | planned |
+| `internal/lib/clock` | lib | internal/lib/analyzer, internal/lib/checker, internal/lib/checker/netwatch, internal/lib/checker/schedule, internal/lib/checker/store, internal/pc, internal/pc/autodesync, internal/pc/monitor, internal/pc/procman, internal/router | – | planned |
 | `internal/lib/faultserver` | test-only | internal/lib/analyzer, lab | – | implemented (M3, lab L2) |
 | `internal/lib/netif` | lib | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc, internal/pc/desync | – | planned |
 | `internal/lib/paths` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
@@ -77,7 +78,7 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 | `internal/lib/route` | lib | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/sites, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop, lab | – | planned |
 | `internal/lib/testca` | test-only | internal/lib/analyzer, internal/lib/faultserver, lab | – | planned |
 | `internal/lib/version` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
-| `internal/pc` | child | api/desktop | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/sites, internal/pc/lib/clashapi | implemented |
+| `internal/pc` | child | api/desktop | internal/pc/singbox, internal/pc/desync, internal/pc/autodesync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/sites, internal/pc/lib/clashapi | implemented |
 | `internal/pc/desync` | child | internal/pc | internal/pc/desync/winws, internal/pc/desync/nfqws | implemented |
 | `internal/pc/desync/nfqws` | child | internal/pc/desync | – | implemented |
 | `internal/pc/desync/winws` | child | internal/pc/desync | – | implemented |
@@ -86,6 +87,7 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 | `internal/pc/procman` | child | internal/pc | – | implemented |
 | `internal/pc/servers` | child | internal/pc | – | implemented |
 | `internal/pc/sites` | child | internal/pc | – | implemented |
+| `internal/pc/autodesync` | child | internal/pc | – | implemented |
 | `internal/pc/singbox` | child | internal/pc | – | implemented |
 | `internal/pc/status` | child | internal/pc | – | implemented |
 | `internal/router` | app | cmd/splitter-router | internal/router/podkop | planned |

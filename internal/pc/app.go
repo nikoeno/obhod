@@ -16,6 +16,7 @@ import (
 
 	"github.com/nikoejento/obhod/internal/lib/paths"
 	"github.com/nikoejento/obhod/internal/lib/route"
+	"github.com/nikoejento/obhod/internal/pc/autodesync"
 	"github.com/nikoejento/obhod/internal/pc/desync"
 	"github.com/nikoejento/obhod/internal/pc/lib/clashapi"
 	"github.com/nikoejento/obhod/internal/pc/procman"
@@ -135,12 +136,25 @@ type App struct {
 	// op serializes connect, disconnect and reload.
 	op opLock
 
+	// Desync choice and search (desyncauto.go). dsMu is a leaf lock: nothing else is locked while it is held.
+	auto          autodesync.Config // Config.DesyncAuto with the defaults filled
+	dsMu          sync.Mutex
+	dsStore       *autodesync.Store // opened on first use
+	dsStoreFailed bool
+	dsSearch      *searchRun
+	dsTrial       *trialState
+	dsLast        *DesyncSearch
+	dsCool        time.Time // automatic searches wait until then
+	dsFails       map[string][]time.Time
+
 	mu         sync.Mutex
 	runCtx     context.Context
 	cancelRun  context.CancelFunc
 	state      State
 	secret     string
-	table      route.Table
+	table      route.Table // what the app runs on: raw with the desync results applied (effectiveTable)
+	raw        route.Table // the checker's table as published
+	dsStates   map[string]string
 	recent     []status.Change
 	uplinkName string
 	engine     engineState
@@ -235,6 +249,7 @@ func New(cfg Config, p paths.Paths, opts ...Option) (*App, error) {
 	if err := a.cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	a.auto = a.cfg.DesyncAuto.WithDefaults()
 	if a.d == nil {
 		d, err := realDeps(a.cfg, p)
 		if err != nil {
@@ -439,8 +454,12 @@ func (a *App) releaseInstance() {
 	}
 }
 
-func (a *App) setTable(t route.Table) {
+// setTable takes a table as the checker published it, applies the desync results to it and makes it the table
+// the app runs on.
+func (a *App) setTable(raw route.Table) {
+	t, states := a.effectiveTable(raw)
 	a.mu.Lock()
+	a.raw, a.dsStates = raw, states
 	var changes []status.Change
 	now := a.d.clk.Now()
 	if a.since == nil {
@@ -540,12 +559,14 @@ func (a *App) Connect(ctx context.Context) error {
 		return err
 	}
 	a.setState(StateConnected)
+	_ = a.startSearch(searchAuto) // sites that already wait for a desync search; the table may be empty yet
 	return nil
 }
 
 // Disconnect stops the monitor, sing-box and the desync engine, in that
 // order, and keeps the checker running.
 func (a *App) Disconnect(ctx context.Context) error {
+	a.stopSearch(true) // a search takes the op lock between its steps: end it first
 	if err := a.op.Lock(ctx); err != nil {
 		return err
 	}
@@ -561,6 +582,10 @@ func (a *App) disconnectLocked(ctx context.Context) error {
 	}
 	a.setState(StateDisconnecting)
 	var errs []error
+	a.stopSearch(false) // the search sees its context end and the state change; it cannot be waited for here
+	a.dsMu.Lock()
+	a.dsTrial = nil
+	a.dsMu.Unlock()
 	a.stopMonitor()
 	for _, name := range []string{nameSingBox, string(desync.WinWS), string(desync.NFQWS)} {
 		if err := a.d.procs.Stop(ctx, name); err != nil && !errors.Is(err, procman.ErrNotFound) {

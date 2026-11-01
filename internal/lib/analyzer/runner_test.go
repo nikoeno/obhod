@@ -189,7 +189,7 @@ func TestRunnerEndToEnd(t *testing.T) {
 	want := []struct {
 		v   Verdict
 		sug route.Route
-	}{{verdict.OK, route.Direct}, {verdict.TLSRST, route.Tunnel}, {verdict.TCPTimeout, route.Tunnel}, {verdict.DNSFail, ""}}
+	}{{verdict.OK, route.Direct}, {verdict.TLSRST, route.Desync}, {verdict.TCPTimeout, route.Tunnel}, {verdict.DNSFail, ""}}
 	if len(rep.Results) != len(want) {
 		t.Fatalf("%d results", len(rep.Results))
 	}

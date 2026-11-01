@@ -75,6 +75,8 @@ Classification order (first match wins): `*LocalErr` in the chain → `LOCAL_ERR
 
 See AGENTS.md "Suggested starting route". `SuggestRoute` returns `(route, true)` or `("", false)`; the report carries an optional `suggestion_note` (e.g. "needs DoH").
 
+**Changed 2026-11-01.** A failure at the TLS stage (`TLS_RST`, `TLS_TIMEOUT`, `TLS_EOF`, `TLS_ALERT`, `TLS_SPOOF`) now suggests `desync` whether or not the SNI swap reached the site, and so does `HTTP_RST` (a reset after a good handshake). Before, a failed swap suggested `tunnel` ("the address itself looks blocked"). Field experience on the target networks showed that on-path (TSPU) blocks at the TLS stage are in practice bypassable by desync even when the neutral SNI fails the same way, while there is no tunnel without a paid server; the tunnel is only suggested for failures at TCP connect (`TCP_TIMEOUT`, `TCP_REFUSED`) and for `STALL_16_20`, `TLS_MITM` and `HTTP_STUB`. `Blocking` is not changed (`Confirm` still needs a successful swap). The note says which case it was: "only the SNI is blocked" (swap worked) or "blocked at the TLS stage; the SNI swap did not help, so desync is tried before the tunnel". The suggestion is a hint, and `desync` is not proof: the app (`internal/pc`) trusts a desync decision only after a trial of its presets has reached the site (see `internal/pc/autodesync`). Open: `STALL_16_20` (a flow that freezes after good TLS and HTTP, so after the bulk stage) stays `tunnel`; whether desync helps it is unmeasured.
+
 ## 8. JSON report (schema 1, frozen)
 
 ```json

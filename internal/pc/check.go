@@ -83,6 +83,9 @@ func CheckConfig(ctx context.Context, cfg Config, p paths.Paths, env CheckEnv, o
 		up = netif.Interface{Name: "check0", Index: 1, Addrs: []netip.Prefix{}}
 	}
 	dcfg := cfg.Desync
+	if dcfg.Preset == desync.PresetAuto {
+		dcfg.Preset = "" // the plan is rendered for the default preset; auto picks one per network at run time
+	}
 	dcfg.ExcludeIPs = excl
 	engine := dcfg.Engine
 	if engine == "" {

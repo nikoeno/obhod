@@ -7,7 +7,7 @@
 | Binary | – |
 | Purpose | composes the desktop engine: checker, sing-box, desync engine, monitor and status page |
 | Consumers | api/desktop |
-| Children | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/sites, internal/pc/lib/clashapi |
+| Children | internal/pc/singbox, internal/pc/desync, internal/pc/autodesync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/sites, internal/pc/lib/clashapi |
 | Uses libs | internal/lib/checker, internal/lib/analyzer, internal/lib/route, internal/lib/paths, internal/lib/clock, internal/lib/version, internal/lib/netif, internal/lib/proc |
 | Build tags | – |
 | Status | implemented (the control API for the UI lives in api/desktop; the exports it needs are below, including server management, ADR 0004 milestone 4) |
@@ -28,6 +28,7 @@ type Config struct {
     Checker  checker.Config
     SingBox  singbox.Config
     Desync   desync.Config
+    DesyncAuto autodesync.Config // desync_auto: tuning of the automatic preset search (2026-11-01)
     Procman  procman.Config
     Monitor  monitor.Config
     Status   status.Config
@@ -76,6 +77,7 @@ type RouteInfo struct {
     LastCheck time.Time       // last finished check cycle; global, not per domain
     History   []status.Change // real route changes of this run, at most 10, oldest first
     Degraded  bool            // Route is tunnel and no tunnel is available (Snapshot.Tunnel == "none"): served direct
+    Desync    string          // with desync.preset auto (2026-11-01): DesyncPending | DesyncVerified for a desync site, DesyncFailed for a site no preset reached (Route is then tunnel); "" otherwise
 }
 func (a *App) Routes() []RouteInfo // sorted by domain; empty while the table is empty
 
@@ -107,12 +109,13 @@ func (r *LogRing) Lines() []string
 
 // Events. The channel has a buffer of 64; a subscriber that falls behind is dropped and its channel closed.
 func (a *App) Subscribe() (<-chan Event, func()) // the func unsubscribes (and closes the channel); never blocks the app
-type EventKind string // EventState "state" | EventRoutes "routes" | EventCheck "check" | EventTraffic "traffic"
+type EventKind string // EventState "state" | EventRoutes "routes" | EventCheck "check" | EventTraffic "traffic" | EventDesync "desync" (2026-11-01)
 type Event struct {
     Kind    EventKind
     Changes []status.Change // routes
     Check   CheckEvent      // check
     Traffic TrafficTick     // traffic
+    Desync  DesyncEvent     // desync
 }
 type CheckEvent struct {
     Running bool
@@ -127,6 +130,33 @@ type TrafficTick struct {
     Savings          float64
     At               time.Time
 }
+
+// Desync presets (2026-11-01, stage 2 of 3; the logic of one search is internal/pc/autodesync, the HTTP side api/desktop).
+type DesyncMode string // DesyncModePreset "preset" | DesyncModeAuto "auto" | DesyncModeCustom "custom"
+type DesyncStatus struct {
+    Mode       DesyncMode
+    Preset     string         // catalogue id in use; in auto the one stored for this network (the default preset until a search ends); "custom" in custom
+    Searching  bool
+    LastSearch *DesyncSearch  // nil until a search ended in this run (not persisted)
+}
+type DesyncSearch struct { At time.Time; Tried []DesyncTry; Chosen string; Outcome string /* chosen | none | inconclusive | error */ }
+type DesyncTry struct { Preset string; Fixed, Total int }
+type DesyncPreset struct{ ID, Name, Description string }
+type DesyncEvent struct { // counts and catalogue ids only, never a site name
+    Phase string // searching | trying | done
+    Index, Total int; Preset string                      // trying
+    Outcome, Chosen string; Fixed, Of int                // done; Outcome is chosen | none | inconclusive | error | canceled
+}
+const (DesyncPending = "pending"; DesyncVerified = "verified"; DesyncFailed = "failed")
+
+func (a *App) Desync() DesyncStatus
+func (a *App) DesyncPresets() []DesyncPreset // the catalogue in display order
+// SetDesync chooses "auto", a catalogue id, or "custom" (only when app.yaml has a strategy). Stored in Paths.Data/desync.json; wins over app.yaml. Applied through the reload path.
+func (a *App) SetDesync(ctx context.Context, preset string) error
+// StartDesyncSearch starts a search now; returns at once, progress arrives as desync events.
+func (a *App) StartDesyncSearch() error
+var ErrDesyncPreset, ErrDesyncBusy, ErrDesyncNotAuto, ErrDesyncNoDomain error
+var ErrProgramMissing error // SetDesync: a named preset's payload file is missing; Classify maps it to CodeProgramMissing
 
 // Server management (ADR 0004 milestone 4; the logic is in internal/pc/servers, the HTTP side in api/desktop).
 // The gateway reaches the servers types only through this alias.
@@ -259,7 +289,33 @@ The tunnel server is added to `desync.ExcludeIPs` automatically when the tunnel 
 
 `Config.Validate` (run when the config is loaded, and by `check-config`) also checks the children's fields that would otherwise fail only at connect time: the sing-box fields through a dry `singbox.Generate` (TUN address, FakeIP range, Clash API address and port, DoH server, which defaults to `analyzer.doh[0]` and must then have an IP host), `desync.Config.Check` (strategy options the app sets itself, ports, ranges) and `checker.Config.Validate`. A relative `singbox.binary`/`desync.binary` is made absolute against the current directory.
 
-Desync presets (decided 2026-11-01, stage 1 of 3; see `desync/API.md` and `desync/PRESETS.md`): `desync.preset` selects a ready-made strategy by a stable id (21 of them, translated from the zapret1 Discord/YouTube pack), `custom` (use `desync.strategy`, the raw zapret2 arguments; also what an older config that sets only `strategy` gets) or `auto` (reserved for the later automatic selection; `Validate` refuses it with "not available yet"). Left empty it means `alt2-multisplit` (the default preset) unless `desync.strategy` is set; the default `app.yaml` written on the first start (`api/desktop`) writes the setting out with comments. A named preset refuses `desync.strategy` and `desync.ports`. A preset names fake payload files that must sit in a `fake` folder next to the engine binary; `buildPlan` checks `Plan.Requires` with `deps.fileExists` (nil in tests: not checked) and a missing file ends the connect like a missing program (`errProgramMissing`, code `program_missing`, the log line names the file and the preset; the fixed UI sentence is unchanged). `check-config` only prints a line for a missing payload file. On Linux the nft check also compares the queue rules' destination ports (`tcp dport`, `udp dport`) with the listing, so a table written for the custom strategy (TCP 80, 443 only) is reported as stale when a preset needs more ports or the UDP rule.
+Desync presets (decided 2026-11-01, stage 1 of 3; see `desync/API.md` and `desync/PRESETS.md`): `desync.preset` selects a ready-made strategy by a stable id (21 of them, translated from the zapret1 Discord/YouTube pack), `custom` (use `desync.strategy`, the raw zapret2 arguments; also what an older config that sets only `strategy` gets) or `auto` (valid since 2026-11-01, see "Desync presets: automatic selection" below; `Validate` accepts it and refuses `strategy` and `ports` with it, as for a named preset). Left empty it means `alt2-multisplit` (the default preset) unless `desync.strategy` is set; the default `app.yaml` written on the first start (`api/desktop`) writes the setting out with comments. A named preset refuses `desync.strategy` and `desync.ports`. A preset names fake payload files that must sit in a `fake` folder next to the engine binary; `buildPlan` checks `Plan.Requires` with `deps.fileExists` (nil in tests: not checked) and a missing file ends the connect like a missing program (`errProgramMissing`, code `program_missing`, the log line names the file and the preset; the fixed UI sentence is unchanged). `check-config` only prints a line for a missing payload file. On Linux the nft check also compares the queue rules' destination ports (`tcp dport`, `udp dport`) with the listing, so a table written for the custom strategy (TCP 80, 443 only) is reported as stale when a preset needs more ports or the UDP rule.
+
+### Desync presets: automatic selection
+
+Decided 2026-11-01 (stage 2 of 3). The search itself (the loop, budget, scoring, the store) is `internal/pc/autodesync`; this module wires it to the engine, the table and the events.
+
+**Modes and the choice.** Mode `preset` (a named id), `auto`, or `custom`. The user's choice through `SetDesync` is kept in `Paths.Data/desync.json` (`selected`) and wins over `desync.preset` of `app.yaml` until it is changed again (`custom` clears it, and only works when `app.yaml` has a strategy). A named preset never starts a search by itself; `StartDesyncSearch` with a named preset is `ErrDesyncNotAuto`. A named preset's payload files are checked when it is chosen (the same files `buildPlan` checks at connect): a missing one is `ErrProgramMissing`, nothing is stored.
+
+**Candidates.** In mode auto, the sites the checker routes to desync with source `checked` or `default` (never a user rule or a list entry) are `pending` until a search has reached them with the stored preset (`verified`) or no preset reaches them (`failed`). The checker is untouched: its decision stays `desync`/`checked`, and `internal/pc` applies the states on top of its table (`effectiveTable`): a `failed` site is served on the **tunnel** route (so with no detour server it is `Degraded`, exactly as a site the checker decided to be tunnel), `pending` and `verified` sites stay `desync` (pending ones run with the default preset until the search ends, which costs nothing if it does not help). `RouteInfo.Desync` carries the state; `Snapshot.Routes` counts a failed site as tunnel. The `routes` events show the move to tunnel like any route change. A failed site is tried again after `desync_auto.failed_ttl` (24 h), on `StartDesyncSearch`, or when its network record is replaced.
+
+**When a search runs.** In the background, never inside `Connect` (it returns as before): after a connect and after every reload, when connected, in mode auto, the network is identified, no search runs, the backoff is over and at least one candidate is `pending` (a new site, a new network, expired failures). `StartDesyncSearch` (the user) takes every desync site, also verified and failed ones, and ignores the backoff. Live failures: the monitor's failures on the desync route for a `verified` site are counted with the checker's own `schedule.failthreshold` / `failwindow`; when they fire, the site goes back to `pending`, the checker is told as before, and a search starts (the stored preset is tried first; at most one such search per `desync_auto.backoff`). A search covers at most `max_domains` sites, pending ones first.
+
+**One search.** The presets are tried in the order of `presetPriority` (`desyncauto.go`; documented in `desync/PRESETS.md`), the network's stored winner first, at most `max_presets` (6). For each, under the op lock: the engine plan is rebuilt for that preset and a hostlist of **only the searched sites** (`trialState`; every reload during the search renders the same plan, so nothing disturbs it), applied with the normal path (`applyEngine`: a restart, the Linux nft check as for a reload), then unlocked; `settle` (2 s) on the app clock; the sites are probed through the real direct dialer by an analyzer runner with its own polite config (`trialAnalyzerConfig`: at most 2 at once, one per address, jitter >= 300-900 ms, no canaries, one attempt, no SNI swap, stages capped at `probe_timeout`). Skipped (payload missing): the preset is not counted. The search stops at the first preset that reaches everything, at the cap, or at the time `budget` (3 min, checked between presets), with a random `pause` (1-3 s) between presets. Progress arrives as `desync` events (`searching`, `trying` i of n, `done`), never with a site name.
+
+**Result and failure handling.**
+
+- *Some preset reaches some site:* the one that reached the most (earlier on a tie) is stored for the network (`autodesync.Record`: preset, time, verified sites, failed sites with the time), the sites it reaches are `verified`, the rest `failed`. Verified sites of an earlier search under the same preset that this search did not probe stay verified; under another preset they become `pending`. The reload path then restarts the engine with the normal plan (all desync sites, the stored preset).
+- *Presets were tried and none reached a site:* the default preset stays in use, every searched site is `failed` (tunnel route, `Degraded` without a server), the record keeps the earlier preset. `lastSearch.outcome` is `none`.
+- *No usable measurement* (the probes' internet check failed, the engine did not start, a probe error): `inconclusive` or `error`; nothing is marked failed; automatic searches wait `desync_auto.backoff` (10 min).
+- *Cancelled* (a disconnect, a shutdown, a switch to a named preset): nothing is stored and `lastSearch` is unchanged; a `done` event with outcome `canceled` is sent.
+- *The network changed* while it ran: the result is discarded (`inconclusive`).
+
+**Reuse.** On a later connect on the same network the stored preset is the engine's preset from the first plan on; no search runs unless a candidate is `pending`. Then the search tries the stored preset first (usually one trial).
+
+**Serialisation.** A search takes the op lock only per step (apply a preset), never while probing, so a reload or a disconnect is never blocked for the length of a measurement. `dsMu` guards the search state and is a leaf lock. `Disconnect` ends a running search before it takes the op lock (the search may be waiting for it); the shutdown path goes through `Disconnect`.
+
+**Known limits.** No real engine was run (rules forbid it): the settle time, the hostlist restart and the probe through a working preset are unverified. The checker probes a desync site on `direct`, through the running engine, so it can see `OK` and move the site to `direct` by its hysteresis (checker `DESIGN.md`). The record is per network id; on a `local:` id (Windows, no echo endpoint) it is per adapter and gateway.
 
 ### nfqws2 identity
 
@@ -285,7 +341,7 @@ Linux with desync domains: `run` lists the `inet splitter` nftables table read-o
 
 ## Testing
 
-Wiring test with fakes for all children and libs; config loading golden tests.
+Wiring test with fakes for all children and libs; config loading golden tests. `desyncauto_test.go` (2026-11-01): the search against a fake engine (`fakeProcs`), a scripted probe and a fake clock whose `Sleep` advances time: first preset fixes nothing, second fixes everything (chosen, stored, reused on reconnect without a search, trial hostlist = the failing sites); nothing fixed (default kept, tunnel/degraded, no immediate re-search); failed site retried after its TTL; a named preset never searches; cancellation by disconnect and by shutdown (nothing stored, trial cleared); the preset cap and the settle and pause bounds on the fake clock; the probe config caps (concurrency <= 2); a reload in the middle of a trial keeps it; a skipped preset (missing payload) does not count; live failures re-search with the stored preset first; the explicit search preconditions; `SetDesync` (validation, storage, switch, missing files = program_missing); the effective table; the priority list. **Not covered:** a real `winws2`/`nfqws2`, a real probe through a mangled path, real timing.
 
 ## Out of scope
 

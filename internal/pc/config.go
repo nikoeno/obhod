@@ -16,6 +16,7 @@ import (
 	"github.com/nikoejento/obhod/internal/lib/analyzer"
 	"github.com/nikoejento/obhod/internal/lib/checker"
 	"github.com/nikoejento/obhod/internal/lib/route"
+	"github.com/nikoejento/obhod/internal/pc/autodesync"
 	"github.com/nikoejento/obhod/internal/pc/desync"
 	"github.com/nikoejento/obhod/internal/pc/monitor"
 	"github.com/nikoejento/obhod/internal/pc/procman"
@@ -56,19 +57,22 @@ type Config struct {
 	Checker  checker.Config  `yaml:"checker"`
 	SingBox  singbox.Config  `yaml:"singbox"`
 	Desync   desync.Config   `yaml:"desync"`
-	Procman  procman.Config  `yaml:"procman"`
-	Monitor  monitor.Config  `yaml:"monitor"`
-	Status   status.Config   `yaml:"status"`
-	Log      LogConfig       `yaml:"log"`
+	// DesyncAuto tunes the automatic preset search (desync.preset: auto).
+	DesyncAuto autodesync.Config `yaml:"desync_auto"`
+	Procman    procman.Config    `yaml:"procman"`
+	Monitor    monitor.Config    `yaml:"monitor"`
+	Status     status.Config     `yaml:"status"`
+	Log        LogConfig         `yaml:"log"`
 }
 
 // DefaultConfig returns the configuration used for keys that app.yaml omits.
 func DefaultConfig() Config {
 	c := Config{
-		Secrets:  SecretsConfig{Tunnel: "tunnel.json"},
-		Analyzer: analyzer.DefaultConfig(),
-		SingBox:  singbox.Config{BlockQUIC: true},
-		Log:      LogConfig{Level: "info", File: "splitter.log", MaxSizeMB: 10, MaxFiles: 3},
+		Secrets:    SecretsConfig{Tunnel: "tunnel.json"},
+		Analyzer:   analyzer.DefaultConfig(),
+		DesyncAuto: autodesync.DefaultConfig(),
+		SingBox:    singbox.Config{BlockQUIC: true},
+		Log:        LogConfig{Level: "info", File: "splitter.log", MaxSizeMB: 10, MaxFiles: 3},
 	}
 	c.SingBox.DNS.DirectDoH = c.Analyzer.DoH[0]
 	return c
@@ -153,8 +157,21 @@ func (c Config) Validate() error {
 		// singbox.dns.direct_doh defaults to analyzer.doh[0], which must then be an IP URL too.
 		add("singbox: %w", err)
 	}
-	if err := c.Desync.Check(); err != nil {
+	dc := c.Desync
+	if dc.Preset == desync.PresetAuto {
+		// auto is resolved by this module to a catalogue id before a plan is built; like a named preset it
+		// refuses the custom strategy and ports. Everything else is checked as for the default preset.
+		if len(dc.Strategy) > 0 || len(dc.Ports) > 0 {
+			add("desync: preset auto refuses strategy and ports (they belong to preset custom)")
+		}
+		dc.Preset = ""
+		dc.Strategy, dc.Ports = nil, nil
+	}
+	if err := dc.Check(); err != nil {
 		add("desync: %w", err)
+	}
+	if err := c.DesyncAuto.Validate(); err != nil {
+		add("%w", err)
 	}
 	if err := c.Checker.Validate(); err != nil {
 		add("%w", err)

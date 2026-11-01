@@ -52,6 +52,8 @@ const (
 	codeUnsupported  = "unsupported_protocol"
 	codeDuplicate    = "duplicate"
 	codeLimit        = "limit_reached"
+	codeNotAuto      = "not_auto"
+	codeNoDomains    = "no_domains"
 	contentTypeJSON  = "application/json; charset=utf-8"
 	contentTypeEvent = "text/event-stream; charset=utf-8"
 )
@@ -116,6 +118,10 @@ func newServer(eng engine, token string, version string, log *slog.Logger, runCt
 		apiPrefix + "/servers/test": {http.MethodPost: s.postServerTest},
 
 		apiPrefix + "/sites": {http.MethodGet: s.noBody(s.getSites), http.MethodPost: s.postSite},
+
+		apiPrefix + "/desync":         {http.MethodGet: s.noBody(s.getDesync), http.MethodPost: s.postDesync},
+		apiPrefix + "/desync/search":  {http.MethodPost: s.postDesyncSearch},
+		apiPrefix + "/desync/presets": {http.MethodGet: s.noBody(s.getDesyncPresets)},
 	}
 	s.siteByID = map[string]handlerFunc{http.MethodDelete: s.noBody(s.deleteSite)}
 	s.idRoutes = map[string]map[string]handlerFunc{
@@ -468,6 +474,9 @@ type routeBody struct {
 	LastCheck time.Time     `json:"lastCheck"`
 	History   []historyBody `json:"history"`
 	Degraded  bool          `json:"degraded"`
+	// Desync is "pending" | "verified" | "failed" for a site routed to desync while desync.preset is auto;
+	// absent otherwise (2026-11-01).
+	Desync string `json:"desync,omitempty"`
 }
 
 // historyBody has the Go field names, like status.Change without the domain.
@@ -595,7 +604,7 @@ func (s *server) getRoutes(w http.ResponseWriter, _ *http.Request) {
 		for _, c := range i.History {
 			hist = append(hist, historyBody{From: c.From, To: c.To, At: c.At.UTC()})
 		}
-		out = append(out, routeBody{Domain: i.Domain, Route: i.Route, Source: i.Source, Since: i.Since.UTC(), LastCheck: i.LastCheck.UTC(), History: hist, Degraded: i.Degraded})
+		out = append(out, routeBody{Domain: i.Domain, Route: i.Route, Source: i.Source, Since: i.Since.UTC(), LastCheck: i.LastCheck.UTC(), History: hist, Degraded: i.Degraded, Desync: i.Desync})
 	}
 	s.writeJSON(w, http.StatusOK, out)
 }
@@ -921,6 +930,8 @@ func (s *server) eventPayload(ev pc.Event) (string, any) {
 			b.Traffic = map[route.Route]int64{}
 		}
 		return "traffic", b
+	case pc.EventDesync:
+		return "desync", desyncEventPayload(ev.Desync)
 	}
 	return "", nil
 }

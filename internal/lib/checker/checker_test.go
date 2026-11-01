@@ -218,13 +218,13 @@ func TestNetworkSwitchRestoresDecisions(t *testing.T) {
 	x := setup(t, Network{}, Config{})
 	x.runner.set(func(d string) string {
 		if x.net.Current().ID == netB && d == "a.com" {
-			return "TLS_RST"
+			return "TCP_TIMEOUT"
 		}
 		if x.net.Current().ID == netB && d == "b.com" {
 			return "OK"
 		}
 		if d == "b.com" {
-			return "TLS_RST"
+			return "TCP_TIMEOUT"
 		}
 		return "OK"
 	})
@@ -271,7 +271,7 @@ func TestHysteresisOverTwoRuns(t *testing.T) {
 	x.waitRoute(t, "a.com", route.Direct, route.SourceChecked)
 	x.call(t)
 
-	x.runner.set(func(string) string { return "TLS_RST" })
+	x.runner.set(func(string) string { return "TCP_TIMEOUT" })
 	x.c.CheckNow("a.com")
 	eventually(t, "first confirmation", func() bool {
 		d, ok := x.store.Get(netA, "a.com")
@@ -310,7 +310,7 @@ func TestFailureThresholdTriggersTargetedRecheck(t *testing.T) {
 
 func TestStaticEntriesAreNeverOverridden(t *testing.T) {
 	x := setup(t, nA, Config{})
-	x.runner.set(func(string) string { return "TLS_RST" })
+	x.runner.set(func(string) string { return "TCP_TIMEOUT" })
 	x.start(t)
 	x.waitRoute(t, "a.com", route.Tunnel, route.SourceChecked)
 	for _, b := range []analyzer.Batch{x.call(t)} {
@@ -338,7 +338,7 @@ func TestCalibrationFailureChangesNothing(t *testing.T) {
 	x.runner.mu.Lock()
 	x.runner.internet = analyzer.CheckFailed
 	x.runner.mu.Unlock()
-	x.runner.set(func(string) string { return "TLS_RST" })
+	x.runner.set(func(string) string { return "TCP_TIMEOUT" })
 	x.c.CheckNow()
 	x.call(t)
 	eventually(t, "calibration warning", func() bool {
@@ -533,7 +533,7 @@ func TestNewWithRealStorePersistsDecisions(t *testing.T) {
 		return c, r
 	}
 	c, r := newC()
-	r.set(func(string) string { return "TLS_RST" })
+	r.set(func(string) string { return "TCP_TIMEOUT" })
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- c.Run(ctx) }()

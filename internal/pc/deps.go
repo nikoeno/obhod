@@ -92,6 +92,10 @@ type deps struct {
 	// payloads, see Plan.Requires). nil: not checked.
 	fileExists func(path string) bool
 	exePath    string
+	// trialProbe probes the sites through the real direct dialer (the uplink-bound one the checker uses) with
+	// the polite settings of trialAnalyzerConfig, and returns the sites that were reached. nil: no automatic
+	// desync search (tests that do not exercise it).
+	trialProbe func(ctx context.Context, domains []string) (map[string]bool, error)
 }
 
 // realDeps wires the real children and libs.
@@ -162,6 +166,11 @@ func realDeps(cfg Config, p paths.Paths) (*deps, error) {
 		return nil, fmt.Errorf("checker: %w", err)
 	}
 	d.checker = ck
+	trial, err := analyzer.NewRunner(trialAnalyzerConfig(cfg.Analyzer, cfg.DesyncAuto), analyzer.Deps{})
+	if err != nil {
+		return nil, fmt.Errorf("analyzer (desync search): %w", err)
+	}
+	d.trialProbe = directProbe(trial, lazy)
 	return d, nil
 }
 

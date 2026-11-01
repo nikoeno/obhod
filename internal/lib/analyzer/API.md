@@ -134,6 +134,8 @@ func NewProber(cfg Config, deps Deps) (Prober, error)
 func NewRunner(cfg Config, deps Deps) (Runner, error)
 
 // SuggestRoute maps a direct-route result to a starting route. It is a hint, not a decision.
+// Since 2026-11-01 a TLS-stage failure and HTTP_RST suggest desync whatever the SNI swap says; only TCP
+// failures (and STALL_16_20, TLS_MITM, HTTP_STUB) suggest tunnel (DESIGN.md §7).
 func SuggestRoute(r ProbeResult) (route.Route, bool)
 
 // Classify maps a connection failure seen elsewhere (e.g. the live monitor) to a verdict.

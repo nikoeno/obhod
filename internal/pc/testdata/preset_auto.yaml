@@ -1,0 +1,5 @@
+desync:
+  preset: auto
+desync_auto:
+  max_presets: 4
+  concurrency: 1

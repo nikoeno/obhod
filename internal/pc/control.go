@@ -39,6 +39,10 @@ type RouteInfo struct {
 	// Degraded: the route is tunnel but no detour server is in use (Snapshot.Tunnel is "none"),
 	// so the site is served direct and probably still blocked.
 	Degraded bool
+	// Desync is the desync state of a site the checker routes to desync, only with desync.preset auto
+	// (2026-11-01): DesyncPending, DesyncVerified, or DesyncFailed (then Route is tunnel: no preset reaches
+	// it). Empty otherwise.
+	Desync string
 }
 
 // Routes returns the current table sorted by domain. It is empty while the
@@ -55,6 +59,7 @@ func (a *App) Routes() []RouteInfo {
 			Since: a.since[e.Domain], LastCheck: last,
 			History:  append([]status.Change(nil), a.history[e.Domain]...),
 			Degraded: noTunnel && e.Route == route.Tunnel,
+			Desync:   a.dsStates[e.Domain],
 		})
 	}
 	return out
@@ -200,6 +205,10 @@ func crashedError() *OpError {
 // errProgramMissing marks a helper program (sing-box, or the desync engine when some site needs it) that
 // cannot be found. Its text names the program for the log; Classify turns it into a fixed sentence.
 var errProgramMissing = errors.New("required program not found")
+
+// ErrProgramMissing is errProgramMissing for callers outside the package: SetDesync returns it (wrapped) when
+// a named preset's fake payload file is not there, and Classify maps it to CodeProgramMissing.
+var ErrProgramMissing = errProgramMissing
 
 // Log names accepted by Logs.
 const (
