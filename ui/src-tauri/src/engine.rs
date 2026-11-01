@@ -6,6 +6,10 @@
 //! through a [`Launcher`], then wait for the ready line (`OBHOD-API v1 host:port`) or the address
 //! file, and confirm with an authenticated `GET /version`. Only loopback addresses are accepted.
 //! The token file is deleted once the engine has answered (the engine keeps the token in memory).
+//!
+//! When the start fails, `--error-file` (`engine-error.txt`) is read, sanitized and attached to the
+//! error as `details` (`diag.rs`). The file stays in `run_dir` as the local copy until the next start
+//! deletes it.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -17,6 +21,7 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use crate::client::Api;
+use crate::diag;
 use crate::error::ApiError;
 use crate::http::{parse_loopback_addr, Client};
 use crate::launcher::{build_args, pkexec_cancelled, LaunchError, LaunchSpec, Launcher, RunningEngine};
@@ -25,6 +30,7 @@ use crate::token::{generate_token, write_token_file};
 
 const TOKEN_FILE: &str = "api.token";
 const ADDR_FILE: &str = "api.addr";
+const ERROR_FILE: &str = "engine-error.txt";
 
 /// Where and how to start the engine.
 #[derive(Debug, Clone)]
@@ -57,6 +63,11 @@ impl EngineConfig {
 
     pub fn addr_path(&self) -> PathBuf {
         self.run_dir.join(ADDR_FILE)
+    }
+
+    /// Where the engine writes its start error (`--error-file`).
+    pub fn error_path(&self) -> PathBuf {
+        self.run_dir.join(ERROR_FILE)
     }
 }
 
@@ -98,6 +109,14 @@ fn cleanup_files(cfg: &EngineConfig) {
     let _ = std::fs::remove_file(cfg.token_path());
 }
 
+/// Cleans up after a failed start and attaches the details to `err`.
+fn failed(cfg: &EngineConfig, token: &str, trusted: bool, stage: &str, exit_code: Option<i32>, err: ApiError) -> ApiError {
+    cleanup_files(cfg);
+    let engine_text = if trusted { diag::read_bounded(&cfg.error_path()) } else { None };
+    let facts = diag::Facts { stage, exit_code, program: &cfg.program, engine_text };
+    err.with_details(diag::render(&facts, token))
+}
+
 /// Launches the engine and waits until it answers. See the module docs.
 pub async fn start_engine(launcher: &dyn Launcher, cfg: &EngineConfig) -> Result<Started, ApiError> {
     std::fs::create_dir_all(&cfg.run_dir).map_err(|_| ApiError::engine_unreachable("The app's data folder is not writable."))?;
@@ -114,17 +133,33 @@ pub async fn start_engine(launcher: &dyn Launcher, cfg: &EngineConfig) -> Result
         }
     }
 
-    let spec = LaunchSpec { program: cfg.program.clone(), args: build_args(&cfg.token_path(), &cfg.addr_path(), cfg.parent_pid) };
-    let mut process = launcher.launch(&spec).map_err(|e| {
-        cleanup_files(cfg);
-        map_launch(e)
-    })?;
+    // The same for the engine's error file: an old text is not this start's error. If it cannot be
+    // removed it is not read either.
+    let error_file_ok = match std::fs::remove_file(cfg.error_path()) {
+        Ok(()) => true,
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    };
+
+    let spec = LaunchSpec {
+        program: cfg.program.clone(),
+        args: build_args(&cfg.token_path(), &cfg.addr_path(), &cfg.error_path(), cfg.parent_pid),
+    };
+    let mut process = match launcher.launch(&spec) {
+        Ok(p) => p,
+        Err(LaunchError::Cancelled) => {
+            cleanup_files(cfg);
+            return Err(map_launch(LaunchError::Cancelled)); // the user said no: nothing to explain
+        }
+        Err(e) => {
+            let stage = if e == LaunchError::NotFound { "the engine program was not found" } else { "the engine could not be launched" };
+            return Err(failed(cfg, &token, error_file_ok, stage, None, map_launch(e)));
+        }
+    };
 
     let deadline = Instant::now() + cfg.ready_timeout;
     let addr = loop {
         if let Some(code) = process.poll_exit() {
-            cleanup_files(cfg);
-            return Err(map_early_exit(code));
+            return Err(failed(cfg, &token, error_file_ok, "the engine exited before it was ready", Some(code), map_early_exit(code)));
         }
         let mut found = None;
         for line in process.take_stdout_lines() {
@@ -140,8 +175,15 @@ pub async fn start_engine(launcher: &dyn Launcher, cfg: &EngineConfig) -> Result
                         None => {
                             // Not a loopback address: never send the token there.
                             process.kill();
-                            cleanup_files(cfg);
-                            return Err(ApiError::engine_unreachable("The engine reported an address the app does not accept."));
+                            let e = ApiError::engine_unreachable("The engine reported an address the app does not accept.");
+                            return Err(failed(
+                                cfg,
+                                &token,
+                                error_file_ok,
+                                "the engine reported an address the app does not accept",
+                                None,
+                                e,
+                            ));
                         }
                     }
                 }
@@ -152,13 +194,13 @@ pub async fn start_engine(launcher: &dyn Launcher, cfg: &EngineConfig) -> Result
         }
         if Instant::now() >= deadline {
             process.kill();
-            cleanup_files(cfg);
-            return Err(ApiError::engine_unreachable("The engine did not start in time."));
+            let e = ApiError::engine_unreachable("The engine did not start in time.");
+            return Err(failed(cfg, &token, error_file_ok, "the engine did not report it was ready in time", None, e));
         }
         sleep(cfg.poll_interval).await;
     };
 
-    let client = Client::new(addr, token).ok_or_else(ApiError::internal)?;
+    let client = Client::new(addr, token.clone()).ok_or_else(ApiError::internal)?;
     let api = Api::new(client.clone());
     // Confirm that this is our engine: it must accept the token.
     let confirm_deadline = Instant::now() + Duration::from_secs(5).min(cfg.ready_timeout);
@@ -167,13 +209,18 @@ pub async fn start_engine(launcher: &dyn Launcher, cfg: &EngineConfig) -> Result
             Ok(_) => break,
             Err(e) => {
                 if let Some(code) = process.poll_exit() {
-                    cleanup_files(cfg);
-                    return Err(map_early_exit(code));
+                    return Err(failed(
+                        cfg,
+                        &token,
+                        error_file_ok,
+                        "the engine exited while the app was checking it",
+                        Some(code),
+                        map_early_exit(code),
+                    ));
                 }
                 if Instant::now() >= confirm_deadline {
                     process.kill();
-                    cleanup_files(cfg);
-                    return Err(e);
+                    return Err(failed(cfg, &token, error_file_ok, "the engine did not answer the app's check", None, e));
                 }
                 sleep(cfg.poll_interval).await;
             }
@@ -307,6 +354,9 @@ mod tests {
         ready: Ready,
         launches: StdMutex<Vec<LaunchSpec>>,
         stale_addr_existed: AtomicBool,
+        stale_error_existed: AtomicBool,
+        /// What the fake engine writes to `--error-file` (`{token}` becomes the token it was given).
+        error_text: StdMutex<Option<String>>,
         token_seen: StdMutex<Option<String>>,
         fail: StdMutex<Option<LaunchError>>,
         exit_code: Arc<AtomicI32>,
@@ -349,6 +399,8 @@ mod tests {
                 ready,
                 launches: StdMutex::new(Vec::new()),
                 stale_addr_existed: AtomicBool::new(false),
+                stale_error_existed: AtomicBool::new(false),
+                error_text: StdMutex::new(None),
                 token_seen: StdMutex::new(None),
                 fail: StdMutex::new(None),
                 exit_code: Arc::new(AtomicI32::new(NOT_EXITED)),
@@ -370,7 +422,12 @@ mod tests {
             let token_file = arg_after(&spec.args, "--token-file");
             let addr_file = arg_after(&spec.args, "--addr-file");
             self.stale_addr_existed.store(std::path::Path::new(addr_file).exists(), Ordering::SeqCst);
+            let error_file = arg_after(&spec.args, "--error-file");
+            self.stale_error_existed.store(std::path::Path::new(error_file).exists(), Ordering::SeqCst);
             let token = std::fs::read_to_string(token_file).unwrap();
+            if let Some(t) = self.error_text.lock().unwrap().clone() {
+                std::fs::write(error_file, t.replace("{token}", &token)).unwrap();
+            }
             *self.token_seen.lock().unwrap() = Some(token.clone());
             self.server.set_token(&token);
             let mut lines = Vec::new();
@@ -449,6 +506,8 @@ mod tests {
         assert_eq!(&spec.args[..2], ["run", "--ui"]);
         assert_eq!(arg_after(&spec.args, "--token-file"), cfg.token_path().to_string_lossy());
         assert_eq!(arg_after(&spec.args, "--addr-file"), cfg.addr_path().to_string_lossy());
+        assert_eq!(arg_after(&spec.args, "--error-file"), cfg.error_path().to_string_lossy());
+        assert!(cfg.error_path().ends_with("engine-error.txt"));
         assert_eq!(arg_after(&spec.args, "--parent-pid"), "4242");
 
         // The token is passed by file only, never on the command line, and the file is gone once the engine answered.
@@ -542,6 +601,111 @@ mod tests {
             let _ = std::fs::remove_dir_all(&cfg.run_dir);
         }
         assert_eq!(seen.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_failed_start_carries_sanitized_details_from_the_error_file() {
+        let srv = server_with_version().await;
+        let l = FakeLauncher::new(srv.clone(), Ready::ExitsEarly(1));
+        *l.error_text.lock().unwrap() = Some(
+            r"splitter: config: open C:\ProgramData\splitter\app.yaml: Access is denied. {token} 203.0.113.7:443 vpn.example.com:8443"
+                .to_string()
+                + "\nexit code: 1\n",
+        );
+        let cfg = config("details");
+        // An old text from an earlier start must be gone before the launch and never reported.
+        std::fs::create_dir_all(&cfg.run_dir).unwrap();
+        std::fs::write(cfg.error_path(), "OLD-ERROR-TEXT").unwrap();
+
+        let e = start_engine(&l, &cfg).await.err().unwrap();
+        assert!(!l.stale_error_existed.load(Ordering::SeqCst), "the old error file was still there at launch");
+        assert_eq!(e.code, "engine_unreachable");
+        let d = e.details.clone().expect("details");
+        assert!(d.contains("stage: the engine exited before it was ready"), "{d}");
+        assert!(d.contains("exit code: 1\n"), "{d}");
+        assert!(d.contains("engine: splitter-fake (missing)"), "{d}");
+        assert!(d.contains("splitter: config: open …/app.yaml: Access is denied."), "{d}");
+        assert!(!d.contains("OLD-ERROR-TEXT"));
+
+        // Not the token, not an address or host, not a directory, not the app's data folder; also not in the JSON.
+        let token = l.token_seen.lock().unwrap().clone().unwrap();
+        let json = serde_json::to_string(&e).unwrap();
+        let run_dir = cfg.run_dir.to_string_lossy().into_owned();
+        let run_dir_json = run_dir.replace('\\', "\\\\");
+        for bad in [token.as_str(), "203.0.113.7", "vpn.example.com", "ProgramData", run_dir.as_str(), run_dir_json.as_str()] {
+            assert!(!d.contains(bad) && !json.contains(bad), "{bad} in {d}");
+        }
+        assert!(json.contains("\"details\""));
+        // The file stays as the local copy until the next start.
+        assert!(cfg.error_path().exists());
+        assert!(!cfg.token_path().exists());
+        let _ = std::fs::remove_dir_all(&cfg.run_dir);
+    }
+
+    #[tokio::test]
+    async fn details_without_an_error_file_and_for_each_failure_stage() {
+        let srv = server_with_version().await;
+        // Exit with no error file: the details say so (e.g. an engine that dies before it parses its flags).
+        let l = FakeLauncher::new(srv.clone(), Ready::ExitsEarly(3));
+        let cfg = config("nofile");
+        let e = start_engine(&l, &cfg).await.err().unwrap();
+        let d = e.details.unwrap();
+        assert!(d.contains("exit code: 3") && d.contains("none (the engine wrote no error file)"), "{d}");
+        let _ = std::fs::remove_dir_all(&cfg.run_dir);
+
+        // Permission code 2 keeps its code and gets the engine's own words.
+        let l = FakeLauncher::new(srv.clone(), Ready::ExitsEarly(2));
+        *l.error_text.lock().unwrap() = Some("splitter: administrator rights are required\nexit code: 2\n".into());
+        let cfg = config("perm");
+        let e = start_engine(&l, &cfg).await.err().unwrap();
+        assert_eq!(e.code, "permission_denied");
+        assert!(e.details.unwrap().contains("administrator rights are required"));
+        let _ = std::fs::remove_dir_all(&cfg.run_dir);
+
+        // Timeout: no exit code.
+        let l = FakeLauncher::new(srv.clone(), Ready::Never);
+        let mut cfg = config("tmo");
+        cfg.ready_timeout = Duration::from_millis(100);
+        let d = start_engine(&l, &cfg).await.err().unwrap().details.unwrap();
+        assert!(d.contains("did not report it was ready in time") && !d.contains("exit code"), "{d}");
+        let _ = std::fs::remove_dir_all(&cfg.run_dir);
+
+        // Bad address and launch failures.
+        let l = FakeLauncher::new(srv.clone(), Ready::BadAddrFile);
+        let cfg = config("badaddr");
+        let d = start_engine(&l, &cfg).await.err().unwrap().details.unwrap();
+        assert!(!d.contains("192.0.2.9"), "{d}");
+        let _ = std::fs::remove_dir_all(&cfg.run_dir);
+        let l = FakeLauncher::new(srv.clone(), Ready::Never);
+        *l.fail.lock().unwrap() = Some(LaunchError::NotFound);
+        let cfg = config("nf");
+        let d = start_engine(&l, &cfg).await.err().unwrap().details.unwrap();
+        assert!(d.contains("not found") && d.contains("(missing)"), "{d}");
+        let _ = std::fs::remove_dir_all(&cfg.run_dir);
+
+        // A cancelled prompt needs no explanation.
+        let l = FakeLauncher::new(srv.clone(), Ready::Never);
+        *l.fail.lock().unwrap() = Some(LaunchError::Cancelled);
+        let cfg = config("cancel");
+        assert!(start_engine(&l, &cfg).await.err().unwrap().details.is_none());
+        let _ = std::fs::remove_dir_all(&cfg.run_dir);
+    }
+
+    #[tokio::test]
+    async fn a_good_start_has_no_details_and_a_huge_error_file_is_read_in_part() {
+        let srv = server_with_version().await;
+        let l = FakeLauncher::new(srv.clone(), Ready::AddrFile);
+        let cfg = config("good");
+        assert!(start_engine(&l, &cfg).await.is_ok());
+        let _ = std::fs::remove_dir_all(&cfg.run_dir);
+
+        let l = FakeLauncher::new(srv, Ready::ExitsEarly(1));
+        *l.error_text.lock().unwrap() = Some(format!("splitter: {}\nTAIL-AFTER-LIMIT\n", "boom ".repeat(10_000)));
+        let cfg = config("huge");
+        let d = start_engine(&l, &cfg).await.err().unwrap().details.unwrap();
+        assert!(d.chars().count() <= diag::MAX_DETAILS_CHARS + 20, "{}", d.len());
+        assert!(!d.contains("TAIL-AFTER-LIMIT") && d.contains("(shortened)"));
+        let _ = std::fs::remove_dir_all(&cfg.run_dir);
     }
 
     #[tokio::test]

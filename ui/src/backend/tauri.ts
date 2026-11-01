@@ -6,17 +6,21 @@ import { listen } from '@tauri-apps/api/event';
 import {
   BackendError,
   type Ack, type Activated, type Backend, type EngineEvent, type EngineState, type LogName, type Logs,
-  type ProcessInfo, type RouteInfo, type Server, type ServerTest, type TestRequest, type Version,
+  type ProcessInfo, type RouteInfo, type Server, type ServerTest, type SiteAction, type SiteRule, type TestRequest, type Version,
 } from './types';
 
-/** Turns whatever `invoke` rejects with into a `BackendError`. Rust sends `{code, message, commands?}`. */
+/** The most characters of `details` kept (the Rust side already caps it; this is a second guard). */
+const MAX_DETAILS = 8000;
+
+/** Turns whatever `invoke` rejects with into a `BackendError`. Rust sends `{code, message, commands?, details?}`. */
 export function toBackendError(e: unknown): BackendError {
   if (e instanceof BackendError) return e;
   if (e && typeof e === 'object') {
-    const o = e as { code?: unknown; message?: unknown; commands?: unknown };
+    const o = e as { code?: unknown; message?: unknown; commands?: unknown; details?: unknown };
     if (typeof o.code === 'string') {
       const commands = Array.isArray(o.commands) ? o.commands.filter((c): c is string => typeof c === 'string') : undefined;
-      return new BackendError(o.code, typeof o.message === 'string' ? o.message : '', commands);
+      const details = typeof o.details === 'string' && o.details.trim() ? o.details.slice(0, MAX_DETAILS) : undefined;
+      return new BackendError(o.code, typeof o.message === 'string' ? o.message : '', commands, details);
     }
   }
   return new BackendError('internal', 'Something went wrong.');
@@ -52,6 +56,9 @@ export function createTauriBackend(run: Run = defaultRun, listenFn: typeof liste
     activateServer: (id: string) => run<Activated>('servers_activate', { id }),
     deleteServer: (id: string) => run<Ack>('servers_delete', { id }),
     testServer: (request: TestRequest) => run<ServerTest>('servers_test', { request }),
+    listSites: () => run<SiteRule[]>('sites_list'),
+    setSite: (domain: string, action: SiteAction) => run<SiteRule>('site_set', { domain, action }),
+    deleteSite: (domain: string) => run<Ack>('site_delete', { domain }),
     onEvent: (handler) => listenFn<EngineEvent>('engine-event', (ev) => handler(ev.payload)),
   };
 }

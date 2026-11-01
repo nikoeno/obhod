@@ -64,6 +64,17 @@ export function buttonModel(s: HomeInput): ButtonModel {
   }
 }
 
+/**
+ * The "Details" text under a failed engine start: what the Rust side attached to the error
+ * (sanitized there). Null when the engine is up or the failure had nothing to explain
+ * (a cancelled permission prompt).
+ */
+export function startDetails(engineDown: boolean, startError: { details?: string } | null): string | null {
+  if (!engineDown) return null;
+  const d = startError?.details?.trim();
+  return d ? d : null;
+}
+
 export type SubAction = 'restart-engine' | 'setup' | 'log' | 'detour' | null;
 
 /** The one suggested action under the subtitle. */

@@ -21,6 +21,7 @@ import (
 	"github.com/nikoejento/obhod/internal/pc/procman"
 	"github.com/nikoejento/obhod/internal/pc/servers"
 	"github.com/nikoejento/obhod/internal/pc/singbox"
+	"github.com/nikoejento/obhod/internal/pc/sites"
 	"github.com/nikoejento/obhod/internal/pc/status"
 )
 
@@ -126,6 +127,10 @@ type App struct {
 	store   *servers.Store
 	pending *activation
 	kick    chan struct{}
+
+	// Per-site rules (sites.go). siteMu serializes rule changes with the call to the checker.
+	siteMu sync.Mutex
+	sites  *sites.Store
 
 	// op serializes connect, disconnect and reload.
 	op opLock
@@ -279,7 +284,9 @@ func (a *App) Run(ctx context.Context) (err error) {
 		a.mu.Unlock()
 	}()
 
-	// 2. The checker, and its first table (the store or the defaults).
+	// 2. The checker, and its first table (the store or the defaults). The user's per-site rules go in
+	// first, so the first table already has them.
+	a.loadSiteRules()
 	var wg sync.WaitGroup
 	fatal := make(chan error, 4)
 	run := func(name string, f func(context.Context) error) task {

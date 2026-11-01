@@ -156,8 +156,9 @@ type fakeChecker struct {
 	table     route.Table
 	sub       chan route.Table
 	reports   []checker.Failure
-	checkNow  [][]string // arguments of CheckNow calls
-	running   bool       // reported as Status().Running
+	checkNow  [][]string    // arguments of CheckNow calls
+	overrides []route.Entry // the last SetOverrides argument
+	running   bool          // reported as Status().Running
 	lastCheck time.Time
 	runs      int
 	// subscribed is set by Subscribe. Like the real checker, publish announces
@@ -190,6 +191,12 @@ func (f *fakeChecker) CheckNow(domains ...string) {
 	f.mu.Lock()
 	f.checkNow = append(f.checkNow, domains)
 	f.mu.Unlock()
+}
+func (f *fakeChecker) SetOverrides(es []route.Entry) error {
+	f.mu.Lock()
+	f.overrides = append([]route.Entry(nil), es...)
+	f.mu.Unlock()
+	return nil
 }
 func (f *fakeChecker) Status() checker.Status {
 	f.mu.Lock()

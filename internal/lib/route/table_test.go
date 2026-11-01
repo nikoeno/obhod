@@ -19,7 +19,7 @@ func mustTable(t *testing.T, es ...Entry) Table {
 }
 
 func TestSourceValid(t *testing.T) {
-	for _, s := range []Source{SourceStatic, SourceChecked, SourceDefault} {
+	for _, s := range []Source{SourceStatic, SourceChecked, SourceDefault, SourceUser} {
 		if !s.Valid() {
 			t.Errorf("%q should be valid", s)
 		}
@@ -53,6 +53,15 @@ func TestNewTable(t *testing.T) {
 		{"last static wins over static",
 			[]Entry{{"a.com", Proxy, SourceStatic}, {"a.com", Block, SourceStatic}},
 			[]Entry{{"a.com", Block, SourceStatic}}},
+		{"user beats static and checked in any order",
+			[]Entry{{"a.com", Block, SourceStatic}, {"a.com", Direct, SourceUser}, {"a.com", Tunnel, SourceChecked}, {"a.com", Proxy, SourceStatic}},
+			[]Entry{{"a.com", Direct, SourceUser}}},
+		{"user overrides earlier static",
+			[]Entry{{"a.com", Block, SourceStatic}, {"a.com", Tunnel, SourceUser}},
+			[]Entry{{"a.com", Tunnel, SourceUser}}},
+		{"last user wins over user",
+			[]Entry{{"a.com", Direct, SourceUser}, {"a.com", Block, SourceUser}},
+			[]Entry{{"a.com", Block, SourceUser}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

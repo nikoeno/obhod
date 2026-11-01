@@ -30,6 +30,7 @@ const (
 	maxBodyBytes      = 64 << 10
 	maxStreams        = 4
 	maxCheckDomains   = 100
+	maxSitePathBytes  = 512
 	streamBuffer      = 64
 	defaultPing       = 15 * time.Second
 	disconnectTimeout = 60 * time.Second
@@ -74,6 +75,7 @@ type server struct {
 
 	routes   map[string]map[string]handlerFunc
 	idRoutes map[string]map[string]handlerFunc // /servers/{id}[/suffix], keyed by the suffix ("" or "activate")
+	siteByID map[string]handlerFunc            // /sites/{domain}, keyed by method
 
 	streams   atomic.Int32
 	authFails atomic.Int64
@@ -112,7 +114,10 @@ func newServer(eng engine, token string, version string, log *slog.Logger, runCt
 
 		apiPrefix + "/servers":      {http.MethodGet: s.noBody(s.getServers), http.MethodPost: s.postServer},
 		apiPrefix + "/servers/test": {http.MethodPost: s.postServerTest},
+
+		apiPrefix + "/sites": {http.MethodGet: s.noBody(s.getSites), http.MethodPost: s.postSite},
 	}
+	s.siteByID = map[string]handlerFunc{http.MethodDelete: s.noBody(s.deleteSite)}
 	s.idRoutes = map[string]map[string]handlerFunc{
 		"":         {http.MethodDelete: s.noBody(s.deleteServer)},
 		"activate": {http.MethodPost: s.postActivateServer},
@@ -251,6 +256,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		methods, ok = s.serverRoute(r)
 	}
 	if !ok {
+		methods, ok = s.siteRoute(r)
+	}
+	if !ok {
 		s.writeError(sw, http.StatusNotFound, codeNotFound, "There is no such endpoint.")
 		return
 	}
@@ -274,6 +282,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // loggedPath is the path for the request log: under /servers/ the segment
 // after it is a server id (or garbage that looks like one) and is shown as {id}.
 func loggedPath(p string) string {
+	if rest, found := strings.CutPrefix(p, apiPrefix+"/sites/"); found && rest != "" {
+		return apiPrefix + "/sites/{domain}" // a site the user named never reaches the log
+	}
 	rest, found := strings.CutPrefix(p, apiPrefix+"/servers/")
 	if !found || rest == "" || rest == "test" {
 		return p
@@ -300,6 +311,17 @@ func (s *server) serverRoute(r *http.Request) (map[string]handlerFunc, bool) {
 	}
 	r.SetPathValue("id", id)
 	return m, true
+}
+
+// siteRoute matches /api/v1/sites/{domain}: one non-empty path segment (the
+// decoded text is stored as PathValue "domain"; the engine validates it).
+func (s *server) siteRoute(r *http.Request) (map[string]handlerFunc, bool) {
+	rest, found := strings.CutPrefix(r.URL.Path, apiPrefix+"/sites/")
+	if !found || rest == "" || len(rest) > maxSitePathBytes || strings.Contains(rest, "/") {
+		return nil, false
+	}
+	r.SetPathValue("domain", rest)
+	return s.siteByID, true
 }
 
 // serverIDShape is 16 lowercase hex characters; the gateway does not pass

@@ -10,7 +10,7 @@ import {
   BackendError,
   type Ack, type Activated, type Backend, type Change, type ConnState, type DevControls, type DevFlag, type EngineErrorBody,
   type EngineEvent, type EngineState, type LogName, type Logs, type ProcessInfo, type Route, type RouteInfo, type Scenario, type Server,
-  type ServerTest, type Snapshot, type TestRequest, type Version,
+  type ServerTest, type SiteAction, type SiteRule, type Snapshot, type TestRequest, type Version,
 } from '../backend/types';
 
 export interface FakeOptions {
@@ -22,6 +22,16 @@ export interface FakeOptions {
 }
 
 const ZERO_TIME = '0001-01-01T00:00:00Z';
+/** A sample of the Details box for the dev-only "engine unreachable" scenario. */
+const FAKE_START_DETAILS = [
+  'stage: the engine exited before it was ready',
+  'exit code: 1',
+  'engine: splitter.exe (found)',
+  'engine output:',
+  'splitter: config: open …/app.yaml: Access is denied.',
+  'exit code: 1',
+].join('\n');
+
 const NEEDS_SETUP: EngineErrorBody = {
   error: 'One-time setup is needed on this computer.',
   code: 'needs_setup',
@@ -37,6 +47,22 @@ const EXTRA_DOMAINS: Array<[string, Route]> = [['ads.example', 'block'], ['track
 
 const SCHEMES: Record<string, string> = { vless: 'vless', vmess: 'vmess', trojan: 'trojan', ss: 'shadowsocks', hy2: 'hysteria2', hysteria2: 'hysteria2', tuic: 'tuic' };
 const MAX_INPUT = 32 * 1024;
+const MAX_SITE_RULES = 500;
+const SITE_ACTIONS: readonly string[] = ['direct', 'desync', 'tunnel', 'block'];
+
+/** The engine's `route.Normalize` plus the leading `*.` / `.` it accepts; null when it would answer 422. */
+function normalizeSite(raw: string): string | null {
+  const d = raw.trim().toLowerCase().replace(/\.$/, '').replace(/^\*?\./, '');
+  if (!d || /[*:/?#\s]/.test(d) || d.includes('://')) return null;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(d)) return null;
+  const labels = d.split('.');
+  for (const l of labels) {
+    if (!l || l.length > 63 || l.startsWith('-') || l.endsWith('-') || !/^[\p{L}\p{N}_-]+$/u.test(l)) return null;
+  }
+  // The real engine stores non-ASCII names as punycode; the fake keeps them as typed.
+  return d.length > 253 ? null : d;
+}
+const SITE_INVALID = 'That is not a plain site name. Enter only the name, for example example.com.';
 const MAX_SERVERS = 20;
 
 interface Parsed { protocol: string; host: string; port: number; key: string; name: string }
@@ -102,6 +128,9 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
   ];
   let routes: RouteInfo[] = [];
   let servers: Server[] = [];
+  let sites: SiteRule[] = [];
+  /** What a ruled row was before the rule (null: the rule added the row). Restored when the rule is deleted. */
+  const before = new Map<string, Pick<RouteInfo, 'route' | 'source' | 'since'> | null>();
   let recent: Change[] = [];
   let seq = 1;
   let sent = { direct: 0, tunnel: 0, desync: 0, proxy: 0 } as Record<string, number>;
@@ -153,6 +182,26 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     'chat.example': { minutesAgo: 3, from: 'direct', source: 'default' },
   };
 
+  /** Puts a rule into the table. Returns the change when the route moved (or the row is new). */
+  function applyRule(rule: SiteRule, record: boolean): Change | null {
+    const at = new Date().toISOString();
+    const row = routes.find((r) => r.domain === rule.domain);
+    if (!row) {
+      before.set(rule.domain, null);
+      routes.push({ domain: rule.domain, route: rule.action, source: 'user', since: at, lastCheck: lastCheck, history: [] });
+      return record ? { Domain: rule.domain, From: '', To: rule.action, At: at } : null;
+    }
+    if (!before.has(rule.domain)) before.set(rule.domain, { route: row.route, source: row.source, since: row.since });
+    const from = row.route;
+    row.source = 'user';
+    if (from === rule.action) return null;
+    row.route = rule.action;
+    row.since = at;
+    const ch: Change = { Domain: rule.domain, From: from, To: rule.action, At: at };
+    if (record) row.history.push(ch);
+    return record ? ch : null;
+  }
+
   function seed(): void {
     const list = [...DOMAINS, ...(flags.extras ? EXTRA_DOMAINS : [])];
     routes = flags.learning
@@ -168,6 +217,8 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
       .flatMap((r) => r.history)
       .filter((c) => Date.now() - Date.parse(c.At) < 24 * 60 * 60000)
       .sort((a, b) => Date.parse(a.At) - Date.parse(b.At));
+    before.clear();
+    for (const rule of sites) applyRule(rule, false);
     if (scenario === 'no-server') servers = [];
     else if (!servers.length) {
       servers = [
@@ -265,6 +316,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     sent = { direct: 0, tunnel: 0, desync: 0, proxy: 0 };
     recent = [];
     servers = [];
+    sites = [];
     seed();
   }
 
@@ -305,7 +357,9 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
       return 'dev';
     },
     async engineStart() {
-      if (scenario === 'engine-unreachable') gone();
+      if (scenario === 'engine-unreachable') {
+        throw new BackendError('engine_unreachable', 'The engine stopped before it was ready.', undefined, FAKE_START_DETAILS);
+      }
       engineRunning = true;
       emit({ kind: 'stream-open', data: {} });
       emitState();
@@ -382,7 +436,7 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
       emit({ kind: 'check', data: { running: true, domains: domains ?? null, changed: 0 } });
       emitState();
       later(() => {
-        const movable = routes.filter((r) => r.route === 'direct' || r.route === 'desync');
+        const movable = routes.filter((r) => r.source !== 'user' && (r.route === 'direct' || r.route === 'desync'));
         const pick = movable.length && !domains ? movable[0]! : undefined;
         const changes: Change[] = [];
         if (pick) {
@@ -490,6 +544,55 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
         if (e instanceof InputError) return { ok: false, protocol: '', code: e.code };
         throw e;
       }
+    },
+    async listSites(): Promise<SiteRule[]> {
+      live();
+      return sites.map((r) => ({ ...r }));
+    },
+    async setSite(domain: string, action: SiteAction): Promise<SiteRule> {
+      live();
+      if (!domain || !action) throw new BackendError('bad_request', 'domain must be a site name such as example.com.');
+      const d = normalizeSite(domain);
+      if (d === null) throw new BackendError('invalid_input', SITE_INVALID);
+      if (!SITE_ACTIONS.includes(action)) throw new BackendError('invalid_input', 'The action must be direct, desync, tunnel or block.');
+      const old = sites.find((r) => r.domain === d);
+      if (!old && sites.length >= MAX_SITE_RULES) throw new BackendError('limit_reached', 'The list of site rules is full. Remove a rule first.');
+      const rule: SiteRule = { domain: d, action, addedAt: old?.addedAt ?? new Date().toISOString() };
+      sites = [...sites.filter((r) => r.domain !== d), rule].sort((a, b) => (a.domain < b.domain ? -1 : 1));
+      const ch = applyRule(rule, true);
+      if (ch) {
+        recent.push(ch);
+        emit({ kind: 'routes', data: { changes: [ch] } });
+      }
+      return { ...rule };
+    },
+    async deleteSite(domain: string): Promise<Ack> {
+      live();
+      const d = normalizeSite(domain);
+      if (d === null) throw new BackendError('invalid_input', SITE_INVALID);
+      if (!sites.some((r) => r.domain === d)) throw new BackendError('not_found', 'There is no rule for that site.');
+      sites = sites.filter((r) => r.domain !== d);
+      const prev = before.get(d);
+      before.delete(d);
+      const row = routes.find((r) => r.domain === d);
+      if (row) {
+        const from = row.route;
+        if (prev === null || prev === undefined) {
+          routes = routes.filter((r) => r.domain !== d);
+          emit({ kind: 'routes', data: { changes: [{ Domain: d, From: from, To: '', At: new Date().toISOString() }] } });
+        } else {
+          row.source = prev.source;
+          if (from !== prev.route) {
+            const ch: Change = { Domain: d, From: from, To: prev.route, At: new Date().toISOString() };
+            row.route = prev.route;
+            row.since = ch.At;
+            row.history.push(ch);
+            recent.push(ch);
+            emit({ kind: 'routes', data: { changes: [ch] } });
+          }
+        }
+      }
+      return { ok: true };
     },
     async onEvent(handler) {
       handlers.add(handler);

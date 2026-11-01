@@ -9,9 +9,9 @@
 | Consumers | cmd/splitter |
 | Children | – |
 | Uses libs | – |
-| Uses modules | internal/pc, internal/pc/status, internal/lib/route, internal/lib/paths, internal/lib/version, internal/lib/netif (tests only) |
+| Uses modules | internal/pc, internal/pc/status, internal/lib/route, internal/lib/paths, internal/lib/version, internal/lib/netif (tests only), internal/lib/checker/lists (tests only) |
 | Build tags | – |
-| Status | implemented: CLI and control API (ADR 0004 milestone 3, `internal/pc/PLAN.md` M12) and server-management endpoints (ADR 0004 milestone 4, `internal/pc/PLAN.md` M13); contracts below, approved by the human 2026-10-31 |
+| Status | implemented: CLI and control API (ADR 0004 milestone 3, `internal/pc/PLAN.md` M12) and server-management endpoints (ADR 0004 milestone 4, `internal/pc/PLAN.md` M13); contracts below, approved by the human 2026-10-31; per-site rules (`/sites`, user-approved 2026-11-01, Go side only) |
 
 ## Responsibility
 
@@ -30,16 +30,27 @@ CLI:
 
 ```
 splitter run [--config PATH] [--parent-pid PID]
-splitter run --ui --token-file PATH [--listen ADDR] [--addr-file PATH] [--config PATH] [--parent-pid PID]
+splitter run --ui --token-file PATH [--listen ADDR] [--addr-file PATH] [--error-file PATH] [--config PATH] [--parent-pid PID]
 splitter check-config [--config PATH]
 splitter --version | --help
 ```
 
-`run` connects at once. `run --ui` (used by the desktop app) starts disconnected, with the checker and the status page running, serves the control API (below) and waits for a `connect` request. `--parent-pid` makes the process shut down cleanly when that process exits. `check-config` loads the config and the secrets, renders the sing-box config and the desync plan once, and runs `sing-box check` when the binary exists; it never prints secrets (`pc.CheckConfig`). The default config is `<Config dir>/app.yaml`; `paths.root` in that file moves the other directories. See `internal/pc/API.md` for what the commands do.
+`run` connects at once. `run --ui` (used by the desktop app) starts disconnected, with the checker and the status page running, serves the control API (below) and waits for a `connect` request. `--parent-pid` makes the process shut down cleanly when that process exits. `check-config` loads the config and the secrets, renders the sing-box config and the desync plan once, and runs `sing-box check` when the binary exists; it never prints secrets (`pc.CheckConfig`). The default config is `<Config dir>/app.yaml`; `paths.root` in that file moves the other directories. With `run --ui` and no `--config`, a missing default `app.yaml` is created on start (see "First start" below). See `internal/pc/API.md` for what the commands do.
 
 ## Behavior / contract
 
 Exit codes: 0 ok, 1 config or usage error (including a bad `--listen`, a bad token file and a busy listen port), 2 needs administrator rights or a manual setup step (the message says which), 3 runtime failure. The code of a failed run comes from `pc.ExitCode`. `SIGINT` and `SIGTERM` end `run` and `check-config` through the context. `Main` writes help and `--version` to stdout and errors and usage to stderr; the log goes to stderr and to the rotated file in `Paths.Logs`.
+
+## First start (default config)
+
+Decided 2026-11-01 (the desktop app launches `run --ui` elevated with no `--config`, and on a fresh Windows machine `<ProgramData>\splitter\app.yaml` does not exist yet):
+
+- Only in `run --ui` and only when `--config` is **not** given: if the default `<Paths.Config>/app.yaml` does not exist, `splitter` creates the directories with `paths.Ensure` (owner-only; an `ErrACL` failure is a warning on stderr, as in `pc`) and writes a default `app.yaml`, then continues normally. The file is written to a private temporary file and hard-linked into place (rename after a check where links are unavailable), so it is atomic and never overwrites an existing file; mode 0600 on Linux.
+- The default file keeps every key at its built-in default (`pc.DefaultConfig`) except `checker.lists`, which points at the three starter list files below (relative paths, resolved by `pc.LoadConfig` against the folder of `app.yaml`). It loads with `pc.LoadConfig` unmodified and holds no secret and no server address. Servers are added later through the server-management API.
+- Starter lists (decided 2026-11-01, so the Sites page is not empty on a fresh install): the files `lists/candidates.txt`, `lists/proxy.txt` and `lists/block.txt` are embedded (`go:embed`, folder `defaultlists/`) and written to `<Paths.Config>/lists/` before `app.yaml`, with the same private temporary file and link-into-place write, so an existing file (a user edit) is never overwritten, even when only `app.yaml` was deleted. `candidates.txt` holds about 140 public domains of services commonly reported as blocked or throttled by DPI (TSPU) in Russia (video, messengers, social networks, music, independent media, AI services, privacy tools, developer services, trackers); the checker probes each and decides direct / desync / tunnel per domain. `proxy.txt` and `block.txt` ship with comments only. The content has no IP, URL or secret (test-enforced).
+- Configurable: edit the text files, add files to a list or change `checker.lists` in `app.yaml`. The lists are read once, when the checker is built at the start of `splitter run`; there is no hot reload, so a change applies the next time `splitter` starts (the UI engine restart). A missing listed file is a startup error; an invalid line is a warning.
+- An explicit `--config` that is missing is still exit 1 and nothing is created. `run` without `--ui` and `check-config` never create anything (a missing default config stays exit 1).
+- Startup then reaches the ready line with no `tunnel.json` (the pre-flight tolerates it in UI mode, decision 21) and without the `sing-box` / `winws2` binaries: they are looked up only at `connect` (and `check-config`). With no `checker.lists` configured the route table starts empty (the Sites page shows "still learning").
 
 ## Config
 
@@ -70,10 +81,10 @@ The only client is the Rust side of the Tauri app (ADR 0003); the web frontend n
 ## Command line additions
 
 ```
-splitter run --ui --token-file PATH [--listen ADDR] [--addr-file PATH] [--config PATH] [--parent-pid PID]
+splitter run --ui --token-file PATH [--listen ADDR] [--addr-file PATH] [--error-file PATH] [--config PATH] [--parent-pid PID]
 ```
 
-- The control API is served only with `--ui`. `--ui` without `--token-file`, and `--token-file`/`--listen`/`--addr-file` without `--ui`, are usage errors (exit 1). `splitter run` from a terminal has no control API.
+- The control API is served only with `--ui`. `--ui` without `--token-file`, and `--token-file`/`--listen`/`--addr-file`/`--error-file` without `--ui`, are usage errors (exit 1). `splitter run` from a terminal has no control API.
 - `--listen ADDR`: default `127.0.0.1:0` (the OS picks the port). The host must be a loopback IP literal (`127.0.0.0/8` or `::1`); `localhost`, a host name, `0.0.0.0`, `::`, an empty host or a missing port are rejected with exit 1 before anything else starts. Bind failure (port busy) is exit 1.
 - Ready line: after the listener is bound **and** the app is ready (pre-flight passed, checker started, state `disconnected`), `splitter` prints exactly one line to stdout, flushes it, and starts serving:
 
@@ -84,6 +95,14 @@ splitter run --ui --token-file PATH [--listen ADDR] [--addr-file PATH] [--config
   Format: `OBHOD-API`, one space, `v1`, one space, `host:port` as in `net.Addr.String()` (`[::1]:54321` for IPv6), then `\n`. The UI matches `^OBHOD-API v1 (\S+)$`. It is the only line on stdout in `--ui` mode (logs go to stderr and the log file). If start fails, no line is printed and the exit code says why. Connections made between bind and the line wait in the listen backlog.
 - `--addr-file PATH` (Q3): also write the same `host:port` (no prefix) to PATH, atomically, mode 0600, when the ready line is printed. A Windows `runas` launch cannot capture stdout. A file that already exists at start is deleted before the port is bound (a dead address from a crashed run, decision 10), and the file is removed again when the process exits cleanly (normal end, `shutdown`, signal, `--parent-pid`). Only a crash or kill may leave it behind, so the UI treats a file whose address does not answer as stale.
 - `--token-file PATH`: see Auth.
+- `--error-file PATH` (decided 2026-11-01): a Windows `runas` launch cannot capture stderr either, so when `run --ui` fails **before** the ready line (usage or config error, needs-administrator, a failed start, a busy port, an unwritable `--addr-file`) it also writes the same one-line stderr message (only its first line, so no usage text) and `exit code: N` to PATH, atomically, owner-only, best effort (a write error is ignored):
+
+  ```
+  splitter: config: open C:\ProgramData\splitter\app.yaml: ...
+  exit code: 1
+  ```
+
+  A file that already exists is deleted at start (before anything can fail), and nothing is written for a clean run or for a failure after the ready line. Only `run --ui` accepts it (otherwise a usage error). The message is the one already printed on stderr: it never holds the token (the token file path may appear, never its content; a message that contains the token is masked as `[hidden]`), and the engine never puts server addresses in startup errors. The UI deletes a stale file before each launch, reads it when the start fails (bounded, sanitized) and shows it under "Details".
 
 ## Listener and transport
 
@@ -110,17 +129,17 @@ Error body (except 401): `{ "error": "<sentence for the user>", "code": "<code>"
 
 | Code | HTTP | When |
 |---|---|---|
-| `bad_request` | 400, 415 | malformed JSON, unknown field, wrong type, bad `name`, bad domain, a missing `input`, `id` and `input` both or neither |
+| `bad_request` | 400, 415 | malformed JSON, unknown field, wrong type, bad `name`, bad domain in `check-now`, a missing `input`, `id` and `input` both or neither, a missing `domain` or `action` in `POST /sites` |
 | `forbidden` | 403 | wrong `Host` |
-| `not_found` | 404 | unknown path; unknown server id (an id that is not 16 lowercase hex characters is also 404) |
+| `not_found` | 404 | unknown path; unknown server id (an id that is not 16 lowercase hex characters is also 404); `DELETE /sites/{domain}` with no rule for that site |
 | `unknown_domain` | 404 | `check-now`: none of the domains is in the table |
 | `method_not_allowed` | 405 | wrong method (`Allow` is set) |
 | `busy` | 409, 429 | 409: `connect` while disconnecting, a server call during a connect or disconnect, deleting the active server while connected; 429: too many event streams |
 | `too_large` | 413 | body over 64 KiB; a server link or JSON over 32 KiB |
-| `invalid_input` | 422 | server calls: malformed or incomplete link or JSON, forbidden keys, or the sing-box dry run failed |
+| `invalid_input` | 422 | server calls: malformed or incomplete link or JSON, forbidden keys, or the sing-box dry run failed; site calls: the domain is not a plain domain name (URL, path, port, IP address, wildcard inside, empty after cleaning) or the action is not `direct`, `desync`, `tunnel` or `block` |
 | `unsupported_protocol` | 422 | server calls: a protocol, transport, cipher or option this version cannot use (including Xray-only ones) |
 | `duplicate` | 409 | `POST /servers`: same protocol, host, port and credential already stored |
-| `limit_reached` | 409 | `POST /servers`: 20 servers stored |
+| `limit_reached` | 409 | `POST /servers`: 20 servers stored; `POST /sites`: 500 rules stored (an update of an existing rule still works) |
 | `engine_unreachable` | 503 | the app is shutting down (the listener is still up) |
 | `internal` | 500 | unexpected; details only in the log |
 
@@ -168,7 +187,7 @@ The Rust side also produces `permission_denied` (UAC or pkexec cancelled) and `e
 - `snapshot` is `status.Snapshot` with its Go names: `Version` (string), `State` (same as `state`), `Network` (label, never the public IP; `unknown network` until identified), `LastCheck`, `NextCheck` (RFC3339; the zero time `0001-01-01T00:00:00Z` when unknown), `Routes` (`{route: domainCount}`), `Traffic` (`{route: bytes}`), `Savings` (float, 0 to 1), `Processes` (`[{Name, State, Restarts}]`), `Warnings` (`[string]`), `Recent` (`[{Domain, From, To, At}]`, the last 20 route changes). Nil slices and maps are encoded as `[]` and `{}`, never `null`. Routes are `direct | desync | tunnel | proxy | block`.
 - `networks`: networks seen since the app started (newest last, at most 10), `label` as in `Snapshot.Network`.
 
-**Route** (`GET /routes`): `{ "domain", "route", "source", "since", "lastCheck", "history": [{ "From", "To", "At" }] }`, sorted by domain. `source` is `route.Source` as a string. `since` is when the entry got its current route (the first table of this run for entries that never changed). `lastCheck` is the time of the last finished check cycle (global, not per domain). `history`: at most 10 route changes of this run, oldest first. The list is empty while the table is empty ("still learning").
+**Route** (`GET /routes`): `{ "domain", "route", "source", "since", "lastCheck", "history": [{ "From", "To", "At" }] }`, sorted by domain. `source` is `route.Source` as a string: `static` (proxy/block list), `checked`, `default`, or `user` (a per-site rule, added 2026-11-01; additive). `since` is when the entry got its current route (the first table of this run for entries that never changed). `lastCheck` is the time of the last finished check cycle (global, not per domain). `history`: at most 10 route changes of this run, oldest first. The list is empty while the table is empty ("still learning").
 
 **Process** (`GET /processes`): `[{ "Name", "State", "Restarts" }]` for `splitter` (always `running`), `sing-box` and `desync` (the `winws2`/`nfqws2` engine). `State` is the procman state (`starting | running | stopping | stopped | failed`); a process that was never started is `stopped`.
 
@@ -355,6 +374,34 @@ All under `/api/v1/`. Bodies are JSON with the 64 KiB limit above; no response c
 
 The server calls were first prototyped in the old `ui/mock` (removed in Stage B, 2026-11-01). They are now covered by `ui/src/dev/fakeBackend.ts`, which checks the link shape and returns the codes above.
 
+## Per-site rules (user-approved 2026-11-01, Go side)
+
+Status: **implemented**; asked for and approved by the human on 2026-11-01 (Go side only; the UI follows as a separate task). Same transport, auth, limits, error format and Host check as above. The logic is not in this module: normalization, validation, the 500-rule limit, the file and the live apply are `internal/pc/sites` and `internal/pc` (contracts: `internal/pc/sites/API.md`, `internal/pc/API.md`, `internal/lib/checker/API.md`). The gateway reaches the rule type through the `pc.SiteRule` alias, so `Uses modules` did not change. The `engine` interface grew `Sites`, `SetSite` and `DeleteSite`.
+
+A **rule** is a domain plus an action. The domain covers its subdomains, like a list entry. Actions: `direct`, `desync`, `tunnel` (always use that path), `block`. "No rule" is the automatic behaviour; it is made by deleting the rule (there is no `none` action; `proxy` is not offered because v1 has no proxy outbound).
+
+**Rule object**: `{ "domain": "example.com", "action": "tunnel", "addedAt": "2026-11-01T10:00:00Z" }`. `domain` is the normalized form (lower case, punycode, no trailing dot); `addedAt` is when the rule was first added (an update keeps it).
+
+| Method | Path | Request | Success | Errors |
+|---|---|---|---|---|
+| GET | `/sites` | - | 200 `[Rule]`, sorted by domain, `[]` when none | 401 403 405 503 |
+| POST | `/sites` | `{ "domain": string, "action": string }` (upsert) | 201 Rule when new, 200 Rule when an existing rule changed | 400 `bad_request` (missing `domain` or `action`, unknown field, wrong type), 413, 415, 422 `invalid_input`, 409 `limit_reached` |
+| DELETE | `/sites/{domain}` | - | 200 `{ok:true}` | 404 `not_found` (no rule for that domain), 422 `invalid_input` (the segment is not a domain name) |
+
+- **Input cleaning is the UI's job.** The domain is normalized (`route.Normalize`: trimmed, lower case, trailing dot removed, IDN to punycode) and, like list files, a leading `*.` or `.` is accepted and dropped. A pasted URL, a path, a port, an IP address or a wildcard inside the name is **rejected with 422** (nothing is stripped for the user). The same normalization applies to `DELETE /sites/{domain}` (the segment is percent-decoded by HTTP, so an IDN name works in either form). A path segment with a `/` or an empty one is no route (404).
+- **Precedence** (highest first): a user rule for a domain beats a proxy/block list entry and a candidate (decided or default) of the **same** domain. A list entry of a more specific domain (a longer name) still decides for its own names, because the table matches the longest suffix: the rule `example.com direct` does not unblock a listed `ads.example.com`. The starter list files are never written by the app.
+- **A rule for a domain in no list** adds it to the route table, so it appears in `GET /routes` with `source: "user"` and a `routes` event (`From` is `""`). A rule for a candidate replaces its route and `source`; the checker stops probing that domain while the rule exists but keeps its stored decisions.
+- **Deleting a rule** returns the domain to automatic: a candidate goes back to its stored decision for the current network (or to the safe default, `tunnel`, until checked); a domain of the proxy/block lists goes back to that entry; a domain in no list **leaves the route table** (`routes` event with `To` `""`) and its traffic follows the engine's default, which is the tunnel (the sing-box final route).
+- **Live apply**: no restart, also while connected. The rule changes the table at once; the existing reload path regenerates the configs after its 3 s debounce (sing-box restarts at most once per 30 s; a rule to or from `desync` also restarts the desync engine). Disconnected: only the sing-box config file is updated; the next `connect` uses the rules. The response does not wait for the reload. Events: the existing `routes` event (reused, none added). A rule that only changes the `source` of an entry, not its route (for example `tunnel` onto a candidate that was already `tunnel`), produces no `routes` event, so the client refetches `GET /sites` and `GET /routes` after every site call.
+- A `desync` rule is subject to the same needs as any desync domain (an IP or resolvable tunnel server, an uplink, the nft setup on Linux); if the plan cannot be built the reload logs it and sing-box still gets its update.
+- **Persistence**: `Paths.Data/sites.json`, owner-only, atomic. An unreadable file is moved to `sites.json.corrupt` and the rules start empty (a warning in the log).
+- **Privacy**: a site the user named is never logged. The request log shows `/api/v1/sites/{domain}` for the delete path; request bodies are not logged; error sentences are fixed.
+- **Not in this feature**: no import or export of rules, no pattern or regex rules, no rule for an IP address, no `proxy` action, no per-rule note, no bulk call.
+
+### Gateway testing (sites)
+
+`httptest` against the fake engine (which mirrors the normalization, the four actions and the 500 limit of `pc`): golden JSON for the empty and filled list and every success and error body, the body rules (missing fields, unknown field, wrong type, 64 KiB, Content-Type), 422 for a URL, port, IP and wildcard, create 201 vs update 200, delete 200/404/422, odd paths (encoded slash, empty name, GET on a rule), 401/403 on every site route, all error kinds with a fixed sentence, and the log test: the site name never appears, the path shows `{domain}`.
+
 ## Decisions
 
 Approved by the human on 2026-10-31: every question below is decided as recommended. Changing one later needs the human and an update here.
@@ -390,6 +437,18 @@ Approved by the human on 2026-10-31 (milestone 4 contract): every open question 
 24. **Read-only server calls are lock-free.** Decided 2026-10-31: `GET /servers` and `POST /servers/test` do not take the Connect/Disconnect/reload lock, so a list refresh never waits behind a connect of up to 45 s. Add, activate and delete do take it.
 25. **Oversized input.** Decided 2026-10-31: a link or JSON over 32 KiB (body still under the 64 KiB cap) answers 413 `too_large`.
 26. **Dry run without a sing-box binary.** Decided 2026-10-31: the dry run then checks only that the config renders and skips `sing-box check` (debug-logged), so a first run before the binary is installed is not blocked.
+
+## Per-site rule decisions
+
+User-approved on 2026-11-01 (Go side). Changing one later needs the human and an update here.
+
+27. **Where rules live.** Decided: `internal/pc/sites` stores them (a new child of `internal/pc`), `internal/pc` hands them to the checker, `api/desktop` only maps HTTP. The route table is the checker's, so the checker got one method (`SetOverrides`) and `route` one additive source (`user`); no list file is written.
+28. **Precedence.** Decided: user rule > block > proxy > candidate for the same domain; a longer (more specific) list entry still decides for its own names (longest suffix). Alternative not taken: let a rule also override more specific list entries below it (it would silently unblock listed subdomains).
+29. **Actions.** Decided: `direct`, `desync`, `tunnel`, `block`; removal is `DELETE`; no `proxy` (no proxy outbound in v1).
+30. **Input.** Decided: the gateway rejects pasted URLs, paths, ports, IPs and inner wildcards with 422 (the UI cleans input); a leading `*.` or `.` is accepted as in list files.
+31. **Limit.** Decided: 500 rules (409 `limit_reached`); updating an existing rule at the limit works.
+32. **Status codes.** Decided: `POST /sites` answers 201 for a new rule and 200 for a changed one; `DELETE` of a name that is not a domain is 422, of a valid name without a rule 404.
+33. **Events.** Decided: reuse `routes`; none added. A source-only change has no event, so the client refetches after each call.
 
 ## Known limits (v1, fixed 2026-10-31)
 

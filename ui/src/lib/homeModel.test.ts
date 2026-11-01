@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Server } from '../backend/types';
-import { buttonModel, setupCard, subAction, type HomeInput } from './homeModel';
+import { buttonModel, setupCard, startDetails, subAction, type HomeInput } from './homeModel';
 
 const base: HomeInput = { engineDown: false, startError: null, state: 'disconnected', error: null, snapshot: { Savings: 0.78 } };
 const srv = (o: Partial<Server> = {}): Server => ({ id: '0000000000000001', name: 'S', protocol: 'vless', engine: 'singbox', host: 'h', port: 1, active: false, addedAt: '', ...o });
@@ -65,5 +65,23 @@ describe('setupCard (first run)', () => {
   it('shows nothing while loading or without an engine', () => {
     expect(setupCard({ ...o, serversLoaded: false })).toBe('none');
     expect(setupCard({ ...o, engineDown: true })).toBe('none');
+  });
+});
+
+describe('startDetails', () => {
+  it('shows the attached text only while the engine is down', () => {
+    expect(startDetails(true, { details: 'stage: x\nexit code: 1\n' })).toBe('stage: x\nexit code: 1');
+    expect(startDetails(false, { details: 'stage: x' })).toBeNull();
+  });
+  it('has nothing to show without details (a cancelled prompt) or without an error', () => {
+    expect(startDetails(true, {})).toBeNull();
+    expect(startDetails(true, { details: '  \n' })).toBeNull();
+    expect(startDetails(true, null)).toBeNull();
+  });
+  it('does not change the sentence or the action of the failure', () => {
+    const startError = { code: 'engine_unreachable', message: 'The engine stopped before it was ready.', details: 'stage: x' };
+    const m = buttonModel({ ...base, engineDown: true, startError });
+    expect(m.sub).toBe('The engine is not running.');
+    expect(subAction(m, true, startError)).toBe('restart-engine');
   });
 });

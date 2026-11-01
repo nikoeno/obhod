@@ -7,7 +7,7 @@
 | Binary | – |
 | Purpose | composes the desktop engine: checker, sing-box, desync engine, monitor and status page |
 | Consumers | api/desktop |
-| Children | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/lib/clashapi |
+| Children | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/sites, internal/pc/lib/clashapi |
 | Uses libs | internal/lib/checker, internal/lib/analyzer, internal/lib/route, internal/lib/paths, internal/lib/clock, internal/lib/version, internal/lib/netif, internal/lib/proc |
 | Build tags | – |
 | Status | implemented (the control API for the UI lives in api/desktop; the exports it needs are below, including server management, ADR 0004 milestone 4) |
@@ -170,6 +170,29 @@ var (
     ErrBusy                error // connecting or disconnecting, or deleting the active server while connected
 )
 
+// Per-site rules (user-approved 2026-11-01; the logic is in internal/pc/sites, the HTTP side in api/desktop).
+// A rule is a domain (normalized like list entries; it covers subdomains) and an action: direct | desync |
+// tunnel | block. Persisted in Paths.Data/sites.json (0600, atomic). The rules reach the checker through
+// checker.SetOverrides at start (before the first table) and after every change.
+type SiteRule = sites.Rule // Domain, Action, AddedAt
+
+// Sites lists the rules sorted by domain, never nil.
+func (a *App) Sites() ([]SiteRule, error)
+
+// SetSite adds or changes the rule of a domain (upsert) and applies it without a restart. created is true for
+// a new rule. It does not take the connect/disconnect/reload lock, so it never waits behind a connect.
+func (a *App) SetSite(domain, action string) (rule SiteRule, created bool, err error)
+
+// DeleteSite removes the rule: the domain returns to automatic.
+func (a *App) DeleteSite(domain string) error
+
+var (
+    ErrSiteDomain   error // not a plain domain name (URL, path, port, IP address, wildcard inside, empty)
+    ErrSiteAction   error // not direct, desync, tunnel or block ("none" and "proxy" included)
+    ErrSiteLimit    error // 500 rules stored
+    ErrSiteNotFound error // DeleteSite: no rule for that domain
+)
+
 // Exit codes of the splitter command.
 const (
     ExitOK      = 0
@@ -212,6 +235,8 @@ sing-box failure: when procman gives up on sing-box while connected, or a reload
 Server management and the reload path: server calls that change state (`AddServer`, `ActivateServer`, `DeleteServer`) take the same lock as `Connect`, `Disconnect` and reload (waiting honours the caller's context); `Servers` and `TestServer` read only. The tunnel outbound is read once at pre-flight and cached; `ActivateServer` replaces the cache, forgets the resolved addresses of a host-name server (the lookup is repeated at the next connect; until then a plan with desync domains is refused and the engine keeps its state, an IP-literal server is excluded at once) and, while connected, asks the reload loop to run at once. With no tunnel outbound (UI first run) the reload only keeps the table up to date.
 
 Reload: on a new table or an uplink change the loop waits 3 s (trailing debounce, on the app's clock), then regenerates both outputs. The desync engine is stopped, started or restarted when its arguments or hostlist changed (any change restarts it: whether the engine re-reads its hostlist is unverified). sing-box is restarted when the bytes of its config changed, at most once per 30 s (a restart drops every connection); a postponed reload is retried after the gap. A config that fails `sing-box check` is dropped before the engine is touched: the old file and process stay and the error is logged. A checked config replaces the old file, which is kept as `sing-box.json.old` until sing-box is ready with the new one; if sing-box does not start with the new config, the old one is put back and sing-box restarted with it. A desync plan that cannot be built (no uplink, the uplink is our TUN) leaves the engine as it is and is logged; sing-box is still updated. On Linux a plan whose nft rules changed (new uplink or tunnel address) restarts the engine only after the table matches, and the routing exemption (`ip rule`, see startup step 3) is present; until then the commands to re-apply are logged. While disconnected only the sing-box file is kept up to date; no process is touched. A change that moves a domain to or from `desync` changes both outputs, so both processes restart (the engine first); a change among `direct`, `tunnel`, `proxy` and `block` restarts sing-box only.
+
+Per-site rules: at start (before the checker's first table) `pc` opens `Paths.Data/sites.json` and gives its rules to `checker.SetOverrides`; an unreadable file is moved to `sites.json.corrupt` and the rules start empty (a warning in the log), a file that cannot be read at all is a warning and the app starts without rules. `SetSite` and `DeleteSite` write the file first, then call `SetOverrides`; the checker publishes a new table, and the reload loop that already handles tables does the rest, so **a rule applies without restarting the engine, also while connected**: `setTable` runs at once (the `routes` event and `Routes()` follow within milliseconds; a change of source only, e.g. checked to user with the same route, has no `routes` event because `route.Diff` ignores it; the client refetches `GET /routes`), and after the 3 s debounce the same reload as for a checker decision regenerates the configs (a change among direct, tunnel, proxy and block restarts sing-box only, once per 30 s; a change to or from desync also restarts the engine). Disconnected: only the sing-box file is kept up to date. A `desync` rule needs the same things as any desync domain (resolved or IP tunnel server, uplink, nft setup on Linux); if the plan cannot be built the reload logs it and sing-box still gets its update. Precedence: see `checker/API.md` ("User overrides"). Rule changes do not take the `op` lock and are not refused during a connect. The log shows counts only, never a domain.
 
 Network identification: the checker gets a DoH resolver (`analyzer.NewDoHResolver(Config.Analyzer, <the same uplink-following direct dialer>)`, endpoints from `analyzer.doh`), so the public IP's ASN is looked up (Team Cymru TXT) from the uplink, never through the TUN, and networks get `asn:<n>` IDs (needs `checker.netwatch.echoendpoints`). The status page names the network by its AS name, else `AS<number>` when only the ASN is known, else `unknown network`; the public IP is never shown or logged.
 Checker probes: the checker's direct dialer is pinned to the uplink (`SO_BINDTODEVICE`, so probes never enter the TUN). The uplink is re-resolved when the binding is older than 2 s, on an uplink event, and after a failed dial (retried once when the uplink differs), so an uplink switch is picked up without waiting for another event.

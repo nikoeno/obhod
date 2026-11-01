@@ -5,7 +5,7 @@
 // mocked invoke layer; the app creates one store and provides it with `provideStore`.
 
 import { inject, reactive, type App, type InjectionKey } from 'vue';
-import { BackendError, type Activated, type Backend, type CheckEvent, type ConnState, type EngineEvent, type EngineErrorBody, type EngineState, type NetworkSeen, type Route, type RouteInfo, type Server, type ServerTest, type Snapshot, type TestRequest, type Traffic } from './backend/types';
+import { BackendError, type Activated, type Backend, type CheckEvent, type ConnState, type EngineEvent, type EngineErrorBody, type EngineState, type NetworkSeen, type Route, type RouteInfo, type Server, type ServerTest, type SiteAction, type SiteRule, type Snapshot, type TestRequest, type Traffic } from './backend/types';
 import { mergeChanges } from './lib/activityModel';
 import { errorInfo, type ErrorInfo } from './lib/errors';
 import { routes as routeCopy } from '../design/copy';
@@ -29,6 +29,8 @@ export interface StoreState {
   routes: RouteInfo[];
   servers: Server[];
   serversLoaded: boolean;
+  /** The user's per-site rules (`GET /sites`). */
+  sites: SiteRule[];
   traffic: { uploadTotal: number; downloadTotal: number; connections: number };
   series: Record<(typeof SERIES_ROUTES)[number], number[]>;
   quit: boolean;
@@ -53,6 +55,7 @@ export function newState(): StoreState {
     routes: [],
     servers: [],
     serversLoaded: false,
+    sites: [],
     traffic: { uploadTotal: 0, downloadTotal: 0, connections: 0 },
     series: { direct: [], tunnel: [], desync: [], proxy: [] },
     quit: false,
@@ -103,8 +106,9 @@ export function createStore(backend: Backend, deps: StoreDeps) {
   /** Reads everything once. False when the engine could not be reached. */
   async function refresh(): Promise<boolean> {
     try {
-      const [st, routes, servers] = await Promise.all([backend.getState(), backend.getRoutes(), backend.listServers().catch(() => null)]);
+      const [st, routes, servers, sites] = await Promise.all([backend.getState(), backend.getRoutes(), backend.listServers().catch(() => null), backend.listSites().catch(() => null)]);
       S.routes = routes;
+      if (sites) S.sites = sites;
       if (servers) {
         S.servers = servers;
         S.serversLoaded = true;
@@ -127,6 +131,13 @@ export function createStore(backend: Backend, deps: StoreDeps) {
       if (e instanceof BackendError && e.code === 'engine_unreachable') setEngineDown();
       return null;
     }
+  }
+
+  /** Refetches the rules and the table: a rule that only changes the source of a row sends no `routes` event. */
+  async function refreshSites(): Promise<void> {
+    const [sites, routes] = await Promise.all([backend.listSites().catch(() => null), backend.getRoutes().catch(() => null)]);
+    if (sites) S.sites = sites;
+    if (routes) S.routes = routes;
   }
 
   async function refreshRoutes(): Promise<void> {
@@ -310,6 +321,26 @@ export function createStore(backend: Backend, deps: StoreDeps) {
     return guarded(backend.testServer(req));
   }
 
+  // Site calls throw the BackendError; the dialog shows siteErrorText(e) where the user is looking.
+
+  /** Adds or changes the rule of a site, then reads the rules and the table again. */
+  async function setSite(domain: string, action: SiteAction): Promise<SiteRule> {
+    const rule = await guarded(backend.setSite(domain, action));
+    await refreshSites();
+    return rule;
+  }
+
+  /** Removes the rule of a site (the app decides again). A rule that is already gone refreshes the lists, then throws `not_found`. */
+  async function removeSite(domain: string): Promise<void> {
+    try {
+      await guarded(backend.deleteSite(domain));
+    } catch (e) {
+      if (e instanceof BackendError && e.code === 'not_found') await refreshSites();
+      throw e;
+    }
+    await refreshSites();
+  }
+
   /** Advanced settings: stop and start again so the engine picks up the change. */
   async function restartConnection(): Promise<boolean> {
     if (S.state !== 'connected') return false;
@@ -352,6 +383,7 @@ export function createStore(backend: Backend, deps: StoreDeps) {
     dispose,
     refresh,
     refreshServers,
+    refreshSites,
     onNewError,
     toggleConnection,
     checkNow,
@@ -361,6 +393,8 @@ export function createStore(backend: Backend, deps: StoreDeps) {
     activateServer,
     removeServer,
     testServer,
+    setSite,
+    removeSite,
     quit,
     routeCount,
     routeTraffic,

@@ -1,0 +1,4 @@
+{
+  "error": "action must be direct, desync, tunnel or block.",
+  "code": "bad_request"
+}

@@ -39,6 +39,7 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
     - `internal/pc/monitor`: watches live connections via the Clash API, detects failures and counts traffic per route
     - `internal/pc/procman`: starts, stops, restarts and supervises child processes that die with the parent
     - `internal/pc/servers`: parses, validates, stores and activates tunnel servers (share links and raw sing-box outbound JSON)
+    - `internal/pc/sites`: stores the user's per-site routing rules (domain + action) in a small private JSON file
     - `internal/pc/singbox`: generates and validates the sing-box config from a RouteTable
     - `internal/pc/status`: serves a local read-only status page with routes, network and VPS savings
   - `internal/router`: runs the checker on OpenWrt and keeps podkop's domain lists up to date
@@ -73,10 +74,10 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 | `internal/lib/netif` | lib | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc, internal/pc/desync | – | planned |
 | `internal/lib/paths` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
 | `internal/lib/proc` | lib | internal/lib/analyzer, internal/pc, internal/pc/procman | – | planned |
-| `internal/lib/route` | lib | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop, lab | – | planned |
+| `internal/lib/route` | lib | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/sites, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop, lab | – | planned |
 | `internal/lib/testca` | test-only | internal/lib/analyzer, internal/lib/faultserver, lab | – | planned |
 | `internal/lib/version` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
-| `internal/pc` | child | api/desktop | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/lib/clashapi | implemented |
+| `internal/pc` | child | api/desktop | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/sites, internal/pc/lib/clashapi | implemented |
 | `internal/pc/desync` | child | internal/pc | internal/pc/desync/winws, internal/pc/desync/nfqws | implemented |
 | `internal/pc/desync/nfqws` | child | internal/pc/desync | – | implemented |
 | `internal/pc/desync/winws` | child | internal/pc/desync | – | implemented |
@@ -84,6 +85,7 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 | `internal/pc/monitor` | child | internal/pc | – | implemented |
 | `internal/pc/procman` | child | internal/pc | – | implemented |
 | `internal/pc/servers` | child | internal/pc | – | implemented |
+| `internal/pc/sites` | child | internal/pc | – | implemented |
 | `internal/pc/singbox` | child | internal/pc | – | implemented |
 | `internal/pc/status` | child | internal/pc | – | implemented |
 | `internal/router` | app | cmd/splitter-router | internal/router/podkop | planned |

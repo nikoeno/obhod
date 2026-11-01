@@ -52,6 +52,7 @@ func newCLIHarness(t *testing.T) *cliHarness {
 		stdout:       h.out,
 		stderr:       h.errOut,
 		defaultPaths: func() (paths.Paths, error) { return h.p, nil },
+		ensure:       func(p paths.Paths) error { return mkdirs(p) },
 		newApp: func(cfg pc.Config, p paths.Paths, opts ...pc.Option) (runner, error) {
 			h.cfgIn, h.opts = cfg, len(opts)
 			return h.runner, nil

@@ -46,6 +46,7 @@ type checkerAPI interface {
 	Subscribe() (<-chan route.Table, func())
 	ReportFailure(f checker.Failure)
 	CheckNow(domains ...string)
+	SetOverrides(entries []route.Entry) error // the user's per-site rules (sites.go)
 	Status() checker.Status
 }
 

@@ -1,0 +1,171 @@
+# Starter list of domains to check (candidates).
+#
+# The checker probes each domain on your connection and decides per domain:
+# direct, desync (DPI evasion) or tunnel. Domains that work fine stay direct.
+# One domain per line; '#' starts a comment; a leading "*." or "." is allowed.
+# A domain also covers its subdomains. Edit freely: add your own, remove what
+# you do not need. Changes apply the next time splitter starts.
+# A domain listed in proxy.txt or block.txt is taken out of this list.
+#
+# These are public services that are commonly reported as blocked or throttled
+# by DPI (TSPU) in Russia. Being listed here is no claim that they are blocked
+# for you right now: the checker finds that out.
+
+# --- Video and streaming
+youtube.com
+youtu.be
+googlevideo.com
+ytimg.com
+ggpht.com
+youtube-nocookie.com
+youtubekids.com
+netflix.com
+nflxvideo.net
+nflximg.net
+nflxso.net
+nflxext.com
+twitch.tv
+ttvnw.net
+jtvnw.net
+vimeo.com
+vimeocdn.com
+dailymotion.com
+
+# --- Messengers and calls
+discord.com
+discordapp.com
+discord.gg
+discord.media
+discordapp.net
+discordcdn.com
+discordstatus.com
+telegram.org
+t.me
+telegram.me
+web.telegram.org
+telegra.ph
+signal.org
+whatsapp.com
+whatsapp.net
+viber.com
+line.me
+zoom.us
+skype.com
+
+# --- Social networks
+instagram.com
+cdninstagram.com
+facebook.com
+fbcdn.net
+fb.com
+messenger.com
+meta.com
+threads.net
+twitter.com
+x.com
+twimg.com
+t.co
+linkedin.com
+licdn.com
+reddit.com
+redd.it
+redditmedia.com
+redditstatic.com
+tumblr.com
+pinterest.com
+medium.com
+
+# --- Music, audio and creators
+spotify.com
+scdn.co
+soundcloud.com
+sndcdn.com
+patreon.com
+patreonusercontent.com
+bandcamp.com
+deezer.com
+tidal.com
+last.fm
+
+# --- Independent news and media
+meduza.io
+dw.com
+bbc.com
+bbc.co.uk
+currenttime.tv
+svoboda.org
+rferl.org
+theins.ru
+novayagazeta.eu
+novayagazeta.ru
+zona.media
+istories.media
+cnn.com
+nytimes.com
+theguardian.com
+reuters.com
+bloomberg.com
+euronews.com
+france24.com
+rfi.fr
+voanews.com
+
+# --- AI services
+openai.com
+chatgpt.com
+oaistatic.com
+oaiusercontent.com
+claude.ai
+anthropic.com
+gemini.google.com
+perplexity.ai
+midjourney.com
+huggingface.co
+character.ai
+poe.com
+
+# --- Privacy and security tools
+proton.me
+protonmail.com
+protonvpn.com
+torproject.org
+mullvad.net
+nordvpn.com
+expressvpn.com
+windscribe.com
+tutanota.com
+tuta.com
+
+# --- Developer and productivity services
+notion.so
+notion.com
+figma.com
+trello.com
+atlassian.com
+slack.com
+dropbox.com
+mega.nz
+speedtest.net
+ookla.com
+docker.com
+docker.io
+npmjs.com
+pypi.org
+githubusercontent.com
+githubassets.com
+
+# --- Torrent trackers and file sharing
+rutracker.org
+nnmclub.to
+rutor.info
+kinozal.tv
+thepiratebay.org
+1337x.to
+archive.org
+
+# --- Other
+wikipedia.org
+wikimedia.org
+change.org
+amnesty.org
+hrw.org

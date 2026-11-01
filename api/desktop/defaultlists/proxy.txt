@@ -1,0 +1,10 @@
+# Static proxy list: domains that ALWAYS go through the tunnel.
+#
+# Unlike candidates.txt, nothing is checked for these domains: they take the
+# tunnel route directly. One domain per line; '#' starts a comment; a domain
+# also covers its subdomains. A domain here is removed from candidates.txt,
+# and block.txt wins over this file. Changes apply the next time splitter
+# starts.
+#
+# Shipped empty. Example (remove the '#' to use it):
+# example.org

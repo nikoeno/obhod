@@ -1,0 +1,12 @@
+[
+  {
+    "domain": "example.com",
+    "action": "tunnel",
+    "addedAt": "2026-10-31T12:01:00Z"
+  },
+  {
+    "domain": "xn--e1afmkfd.xn--p1ai",
+    "action": "block",
+    "addedAt": "2026-10-31T12:02:00Z"
+  }
+]

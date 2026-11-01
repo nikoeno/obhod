@@ -86,7 +86,7 @@ export function historyRows(history: Change[] | undefined): HistoryRow[] {
     .map((c) => ({ text: `${routeWord(c.From)} → ${routeWord(c.To)}`, time: fmtTime(c.At), tech: `${c.From} → ${c.To}` }));
 }
 
-export interface PanelFacts { word: string; long: string; engine: string; dot: string; since: string; decided: string; lastCheck: string }
+export interface PanelFacts { word: string; long: string; engine: string; dot: string; since: string; decided: string; lastCheck: string; byUser: boolean }
 
 export function panelFacts(r: RouteInfo, now = Date.now()): PanelFacts {
   const meta = routeCopy[r.route];
@@ -98,5 +98,7 @@ export function panelFacts(r: RouteInfo, now = Date.now()): PanelFacts {
     since: `${fmtAgo(r.since, now)} (${fmtTime(r.since)})`,
     decided: sourceWord(r.source),
     lastCheck: `${fmtAgo(r.lastCheck, now)} (all sites)`,
+    /** A rule of the user decides: the checker leaves the site alone. */
+    byUser: r.source === 'user',
   };
 }

@@ -82,7 +82,7 @@ User actions:
 
 ### 5.2 Sites
 
-What the app decided for each site. Read-only in v1.
+What the app decided for each site, and the rules the user sets themselves.
 
 Tabs:
 
@@ -102,12 +102,15 @@ User actions:
 | Click a site | side panel: current path, how it was decided, history of route changes for it, time of the last check (global, not per site) | `routes`, events |
 | **Check this site again** (side panel) | re-probes that one domain | `POST check-now {domains:[…]}` |
 | **Check all again** (toolbar) | re-probes everything | `POST check-now` |
-| **Always use …** (side panel) | **later**: per-domain override (PLAN.md §3) | – |
-| **Add a site** | **later**: list editing (PLAN.md §3) | – |
+| **Always use …** (side panel) | opens a dialog with the four paths in user words (Everyday, Picky, Blocked, Blocked by you); **Save** sets the per-domain rule (`direct`, `desync`, `tunnel`, `block`) | `POST sites` (API.md "Per-site rules") |
+| **Remove my rule** (side panel, only when the site has a rule) | back to automatic | `DELETE sites/{domain}` |
+| **Add a site** (toolbar) | dialog with a site field and the same four paths; a rule for a domain in no list adds it to the table (`source: "user"`); editing the list files stays out of scope (the starter lists are read-only to the app) | `POST sites` |
 
 Empty state (no network identified yet): "Still learning this network. Sites will appear in a few seconds."
 
-Built (Stage B, 2026-11-01): rows are sorted by domain; the tab counts come from the table; Via proxy and Blocked by you tabs appear only when non-empty. Deep links: `#/sites?route=<route>` (Home cards), `#/sites?domain=<d>&q=<d>` (a change on Activity opens that site's panel). **Check all again** and **Check this site again** use `check-now`; the result arrives as a `check` event and a toast. **Add a site** and **Always use…** are disabled with a "later" badge. Esc closes the panel and returns focus to the row; Ctrl+F focuses the search box.
+Built (Stage B, 2026-11-01): rows are sorted by domain; the tab counts come from the table; Via proxy and Blocked by you tabs appear only when non-empty. Deep links: `#/sites?route=<route>` (Home cards), `#/sites?domain=<d>&q=<d>` (a change on Activity opens that site's panel). **Check all again** and **Check this site again** use `check-now`; the result arrives as a `check` event and a toast. Esc closes the panel and returns focus to the row; Ctrl+F focuses the search box.
+
+Built (per-site rules, 2026-11-01): **Add a site** and **Always use…** open the same dialog (`SiteRuleDialog`; Esc closes it and focus returns to the button that opened it). The UI cleans the typed or pasted site before sending (`cleanSiteInput`): scheme, user info, path, query, fragment, port, a trailing dot and a leading `*.` or `.` are dropped and the name is lower-cased; a leading `www.` is kept only if typed. Empty input, IP addresses and anything that is not a name get an inline message and nothing is sent. Engine errors stay inline in the dialog in fixed sentences (`invalid_input`, `limit_reached` at 500 rules, `not_found`); success shows a toast ("example.com will always use Blocked."). After every site call the app refetches `GET /sites` and `GET /routes`, since a change of source alone sends no `routes` event. A row with `source: "user"` shows **Set by you** in the decided column; the tab follows the `route` the engine reports (a `block` rule is under **Blocked by you**, a `tunnel` rule under **Blocked**). For such a site **Check this site again** is disabled (the checker leaves a ruled site alone) and the panel says why. **Remove my rule** shows when the row's source is `user` or a stored rule exists for the domain. The Rust side validates the action and the name length, percent-encodes the name in the `DELETE` path, and replaces the engine's message of `invalid_input`, `limit_reached`, `not_found` and `bad_request` with a fixed sentence.
 
 ### 5.3 Activity
 
@@ -238,7 +241,7 @@ The web frontend calls Tauri commands only; the Rust side is the only API client
 1. ~~**Importing the server file.**~~ **Answered (2026-10-31, ADR 0004 milestone 4):** the engine owns secret writing. The UI sends the pasted link or JSON with `POST /servers`; `splitter` stores it under `Paths.Secrets/servers`, copies the active server to the `tunnel` file and never returns a secret. The installer step and a UI-written secrets file are dropped. The `proxy` outbound is not covered in v1.
 2. **Editing Advanced settings.** Does the UI write `app.yaml`, or does the API get a config endpoint? Today no endpoint changes config.
 3. **"Configure nothing" vs "add a server link".** The reference design promises no setup; a detour server is still required. The "import a server file" half is **answered (2026-10-31, ADR 0004 milestone 4):** the user pastes a link and the engine stores it (question 1). **Still open:** is "Skip for now" (Everyday + Picky only) an acceptable default? The app (like the prototype before it) only hides the first-run card and shows a banner, because the engine cannot run without a server today: `connect` answers `tunnel_missing`. A real Everyday + Picky only mode (sing-box without the tunnel outbound) needs an engine decision; until then Skip only postpones the setup.
-4. **Per-domain overrides and adding sites** (PLAN.md §3): which page they live on once decided (proposed: Sites side panel).
+4. **Per-domain overrides and adding sites** (PLAN.md §3): **Go side done (2026-11-01):** `GET/POST /api/v1/sites`, `DELETE /api/v1/sites/{domain}` (`api/desktop/API.md`, "Per-site rules"); rules are stored in `Paths.Data/sites.json`, beat the lists for the same domain (a more specific list entry still wins for its own names), apply live without a restart, a rule for an unlisted domain appears in `GET /routes` with `source: "user"`, and deleting it returns the domain to automatic (an unlisted one leaves the table). **UI built 2026-11-01:** the rules live on the Sites page (side panel **Always use…** / **Remove my rule**, toolbar **Add a site**); `source: "user"` reads "Set by you"; after every site call the app refetches `/sites` and `/routes` (a source-only change has no `routes` event); pasted URLs are cleaned in the UI (section 5.2). Not verified against the real engine (needs the elevated flow).
 5. **DNS reject notices** (G19): if built, show them under Activity → Warnings.
 6. **Service mode** (ADR 0003 decision 3, later): removes the UAC prompt per Start and lets the connection survive Quit; the Quit wording and first-run step 3 change then.
 7. Localisation: which languages ship in v1.

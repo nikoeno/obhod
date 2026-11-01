@@ -15,11 +15,23 @@ const (
 	SourceStatic  Source = "static"  // from proxy/block lists; never changed by the checker
 	SourceChecked Source = "checked" // decided by the checker from probes
 	SourceDefault Source = "default" // safe default for an unknown network (no probe yet)
+	SourceUser    Source = "user"    // set by the user for this domain; beats every other source
 )
 
 // Valid reports whether s is a known source.
 func (s Source) Valid() bool {
-	return s == SourceStatic || s == SourceChecked || s == SourceDefault
+	return s == SourceStatic || s == SourceChecked || s == SourceDefault || s == SourceUser
+}
+
+// rank orders the sources for NewTable: user, then static, then the rest.
+func (s Source) rank() int {
+	switch s {
+	case SourceUser:
+		return 2
+	case SourceStatic:
+		return 1
+	}
+	return 0
 }
 
 // Entry routes a domain and all its subdomains.
@@ -45,8 +57,9 @@ type Change struct {
 }
 
 // NewTable validates entries, normalizes their domains, removes duplicates and sorts
-// them by Domain. For duplicate domains the last entry wins, but a SourceStatic entry
-// is never overridden by an entry of another source. The input slice is copied.
+// them by Domain. For duplicate domains the last entry wins, but a SourceUser entry is
+// never overridden by an entry of another source, and a SourceStatic entry is never
+// overridden by one that is neither user nor static. The input slice is copied.
 // Errors wrap ErrInvalidRoute (also used for an unknown source) or ErrInvalidDomain.
 func NewTable(networkID string, generated time.Time, entries []Entry) (Table, error) {
 	byDomain := make(map[string]Entry, len(entries))
@@ -62,7 +75,7 @@ func NewTable(networkID string, generated time.Time, entries []Entry) (Table, er
 			return Table{}, err
 		}
 		e.Domain = d
-		if old, ok := byDomain[d]; ok && old.Source == SourceStatic && e.Source != SourceStatic {
+		if old, ok := byDomain[d]; ok && old.Source.rank() > e.Source.rank() {
 			continue
 		}
 		byDomain[d] = e

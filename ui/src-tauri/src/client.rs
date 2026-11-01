@@ -71,6 +71,26 @@ pub struct Ack {
     pub checking: Option<bool>,
 }
 
+/// A per-site rule (`GET /sites`, answer of `POST /sites`). `action` is `direct`, `desync`, `tunnel` or `block`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SiteRule {
+    pub domain: String,
+    pub action: String,
+    pub added_at: String,
+}
+
+/// The actions a rule can have. "No rule" is made by deleting the rule.
+pub const SITE_ACTIONS: [&str; 4] = ["direct", "desync", "tunnel", "block"];
+
+/// Fixed sentences for failed site calls. The engine's own sentences are the same; these replace
+/// whatever came back, so the answer to a site call never carries anything but a fixed sentence
+/// (never the domain the user typed).
+const SITE_INVALID: &str = "That is not a plain site name. Enter only the name, for example example.com.";
+const SITE_LIMIT: &str = "The list of site rules is full. Remove a rule first.";
+const SITE_NOT_FOUND: &str = "There is no rule for that site.";
+const SITE_BAD_REQUEST: &str = "The engine did not accept this site rule.";
+
 /// What `POST /servers/test` takes: exactly one of the two.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -114,7 +134,7 @@ pub fn error_from_response(r: &Response) -> ApiError {
     }
     if let Ok(b) = serde_json::from_slice::<Body>(&r.body) {
         if !b.code.is_empty() {
-            return ApiError { code: b.code, message: b.error, commands: b.commands };
+            return ApiError { code: b.code, message: b.error, commands: b.commands, details: None };
         }
     }
     match r.status {
@@ -220,6 +240,27 @@ impl Api {
         parse(&self.raw("DELETE", &format!("/servers/{id}"), None).await?)
     }
 
+    /// `GET /sites`: the user's rules, sorted by domain.
+    pub async fn sites(&self) -> Result<Vec<SiteRule>, ApiError> {
+        parse(&self.raw("GET", "/sites", None).await?)
+    }
+
+    /// `POST /sites` (upsert). The domain is sent in the body only; it is never logged or echoed.
+    pub async fn set_site(&self, domain: &str, action: &str) -> Result<SiteRule, ApiError> {
+        let domain = site_domain(domain)?;
+        if !SITE_ACTIONS.contains(&action) {
+            return Err(ApiError::bad_request(SITE_BAD_REQUEST));
+        }
+        let body = json!({ "domain": domain, "action": action });
+        parse(&self.raw("POST", "/sites", Some(&body)).await.map_err(site_error)?)
+    }
+
+    /// `DELETE /sites/{domain}`: back to the automatic behaviour.
+    pub async fn delete_site(&self, domain: &str) -> Result<Ack, ApiError> {
+        let domain = site_domain(domain)?;
+        parse(&self.raw("DELETE", &format!("/sites/{}", path_segment(domain)), None).await.map_err(site_error)?)
+    }
+
     pub async fn test_server(&self, req: &TestRequest) -> Result<ServerTest, ApiError> {
         if req.id.is_some() == req.input.is_some() {
             return Err(ApiError::bad_request("Send either an id or an input."));
@@ -227,6 +268,41 @@ impl Api {
         let body = serde_json::to_value(req).map_err(|_| ApiError::internal())?;
         parse(&self.raw("POST", "/servers/test", Some(&body)).await?)
     }
+}
+
+/// Replaces the message of the codes site calls can fail with by a fixed sentence.
+fn site_error(mut e: ApiError) -> ApiError {
+    let fixed = match e.code.as_str() {
+        "invalid_input" => SITE_INVALID,
+        "limit_reached" => SITE_LIMIT,
+        "not_found" => SITE_NOT_FOUND,
+        "bad_request" => SITE_BAD_REQUEST,
+        _ => return e,
+    };
+    e.message = fixed.to_string();
+    e
+}
+
+/// A domain as sent to the engine: not empty, at most 253 bytes (the longest name), no control
+/// characters or spaces. Everything else (labels, IP addresses, URLs) is the engine's 422.
+fn site_domain(domain: &str) -> Result<&str, ApiError> {
+    if domain.is_empty() || domain.len() > 253 || domain.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(ApiError::new("invalid_input", SITE_INVALID));
+    }
+    Ok(domain)
+}
+
+/// Percent-encodes everything but unreserved characters, so a name can only ever be one path segment.
+fn path_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 /// Ids are 16 lowercase hex characters; anything else cannot exist (404 on the engine too), and
@@ -437,5 +513,92 @@ mod tests {
         assert_eq!(api.version().await.unwrap_err().code, "engine_unreachable");
         srv.reply("GET", "/api/v1/state", 200, "not json");
         assert!(api.state().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn site_rules_round_trip() {
+        let (srv, api) = setup().await;
+        srv.reply("GET", "/api/v1/sites", 200, &testdata("sites_filled.golden.json"));
+        let list = api.sites().await.unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[1].action, "block");
+        srv.reply("GET", "/api/v1/sites", 200, &testdata("sites_empty.golden.json"));
+        assert!(api.sites().await.unwrap().is_empty());
+
+        srv.reply("POST", "/api/v1/sites", 201, &testdata("site_created.golden.json"));
+        let r = api.set_site("example.com", "tunnel").await.unwrap();
+        assert_eq!((r.domain.as_str(), r.action.as_str()), ("example.com", "tunnel"));
+        srv.reply("POST", "/api/v1/sites", 200, &testdata("site_updated.golden.json"));
+        assert_eq!(api.set_site("example.com", "direct").await.unwrap().action, "direct");
+        srv.reply("DELETE", "/api/v1/sites/example.com", 200, &testdata("site_deleted.golden.json"));
+        assert!(api.delete_site("example.com").await.unwrap().ok);
+
+        let reqs = srv.requests();
+        let posts: Vec<_> = reqs.iter().filter(|r| r.method == "POST").collect();
+        let sent: Value = serde_json::from_slice(&posts[0].body).unwrap();
+        assert_eq!(sent, json!({ "domain": "example.com", "action": "tunnel" }));
+        assert_eq!(reqs.last().unwrap().path, "/api/v1/sites/example.com");
+        assert!(reqs.last().unwrap().body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn site_errors_map_to_fixed_sentences() {
+        let (srv, api) = setup().await;
+        let cases = [
+            ("POST", "/api/v1/sites", 422, "error_site_invalid_domain.golden.json", "invalid_input"),
+            ("POST", "/api/v1/sites", 409, "error_site_limit.golden.json", "limit_reached"),
+            ("DELETE", "/api/v1/sites/my-site.test", 404, "error_site_not_found.golden.json", "not_found"),
+            ("POST", "/api/v1/sites", 400, "error_site_domain_missing.golden.json", "bad_request"),
+        ];
+        for (method, path, status, golden, code) in cases {
+            srv.reply(method, path, status, &testdata(golden));
+            let e = if method == "POST" {
+                api.set_site("my-site.test", "block").await.unwrap_err()
+            } else {
+                api.delete_site("my-site.test").await.unwrap_err()
+            };
+            assert_eq!(e.code, code, "{golden}");
+            assert!(!e.message.contains("my-site"), "{golden}");
+        }
+        // A hostile engine body cannot put its own text (or the typed name) into the message.
+        srv.reply("POST", "/api/v1/sites", 422, r#"{"error":"bad: secret-site.example","code":"invalid_input"}"#);
+        let e = api.set_site("secret-site.example", "block").await.unwrap_err();
+        assert!(!format!("{e:?}").contains("secret-site"));
+        // Other codes keep the engine's sentence; a lost engine stays recognisable.
+        srv.reply("POST", "/api/v1/sites", 500, &testdata("error_site_internal.golden.json"));
+        assert_eq!(api.set_site("example.com", "block").await.unwrap_err().code, "internal");
+        srv.reply("POST", "/api/v1/sites", 503, "");
+        assert!(api.set_site("example.com", "block").await.unwrap_err().is_engine_lost());
+    }
+
+    #[tokio::test]
+    async fn bad_site_arguments_never_reach_the_engine() {
+        let (srv, api) = setup().await;
+        let long = "a".repeat(254);
+        for bad in ["", "a b.example", "x\n.example", long.as_str()] {
+            assert_eq!(api.set_site(bad, "block").await.unwrap_err().code, "invalid_input");
+            assert_eq!(api.delete_site(bad).await.unwrap_err().code, "invalid_input");
+        }
+        for bad in ["", "none", "proxy", "BLOCK"] {
+            assert_eq!(api.set_site("example.com", bad).await.unwrap_err().code, "bad_request", "{bad}");
+        }
+        assert!(srv.requests().is_empty());
+    }
+
+    #[test]
+    fn site_names_stay_one_path_segment() {
+        assert_eq!(path_segment("example.com"), "example.com");
+        assert_eq!(path_segment("a/b?c#d"), "a%2Fb%3Fc%23d");
+        assert_eq!(path_segment("../x"), "..%2Fx");
+        assert_eq!(path_segment("\u{43f}"), "%D0%BF");
+    }
+
+    #[tokio::test]
+    async fn site_calls_do_not_leak_the_token() {
+        let (srv, api) = setup().await;
+        srv.reply("POST", "/api/v1/sites", 422, &testdata("error_site_invalid_domain.golden.json"));
+        let e = api.set_site("example.com", "block").await.unwrap_err();
+        let shown = format!("{e} {e:?} {}", serde_json::to_string(&e).unwrap());
+        assert!(!shown.contains(TOKEN));
     }
 }

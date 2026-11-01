@@ -38,6 +38,9 @@ describe('the mocked invoke layer', () => {
     await backend.deleteServer('0000000000000001');
     await backend.testServer({ input: 'vless://x' });
     await backend.testServer({ id: '0000000000000001' });
+    await backend.listSites();
+    await backend.setSite('example.com', 'block');
+    await backend.deleteSite('example.com');
     expect(calls).toEqual([
       { cmd: 'ui_version' },
       { cmd: 'engine_start' },
@@ -59,6 +62,9 @@ describe('the mocked invoke layer', () => {
       { cmd: 'servers_delete', args: { id: '0000000000000001' } },
       { cmd: 'servers_test', args: { request: { input: 'vless://x' } } },
       { cmd: 'servers_test', args: { request: { id: '0000000000000001' } } },
+      { cmd: 'sites_list' },
+      { cmd: 'site_set', args: { domain: 'example.com', action: 'block' } },
+      { cmd: 'site_delete', args: { domain: 'example.com' } },
     ]);
   });
 
@@ -80,6 +86,14 @@ describe('toBackendError', () => {
     const e = toBackendError({ code: 'needs_setup', message: 'Setup.', commands: ['a', 3, 'b'] });
     expect(e).toBeInstanceOf(BackendError);
     expect(e).toMatchObject({ code: 'needs_setup', message: 'Setup.', commands: ['a', 'b'] });
+  });
+  it('keeps the start-failure details as text and drops other types', () => {
+    const e = toBackendError({ code: 'engine_unreachable', message: 'Down.', details: 'stage: x\nexit code: 1' });
+    expect(e.details).toBe('stage: x\nexit code: 1');
+    expect(toBackendError({ code: 'busy', message: 'x' }).details).toBeUndefined();
+    expect(toBackendError({ code: 'busy', message: 'x', details: 42 }).details).toBeUndefined();
+    expect(toBackendError({ code: 'busy', message: 'x', details: '   ' }).details).toBeUndefined();
+    expect(toBackendError({ code: 'busy', message: 'x', details: 'y'.repeat(20000) }).details).toHaveLength(8000);
   });
   it('turns anything else into a generic internal error without leaking it', () => {
     for (const odd of ['boom with secret', 42, null, undefined, { nope: true }, new Error('inner detail')]) {

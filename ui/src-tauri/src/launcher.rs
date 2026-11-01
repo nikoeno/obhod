@@ -45,8 +45,8 @@ pub trait Launcher: Send + Sync {
     fn launch(&self, spec: &LaunchSpec) -> Result<Box<dyn RunningEngine>, LaunchError>;
 }
 
-/// `splitter run --ui --token-file P --addr-file P2 [--parent-pid PID]` (api/desktop/API.md).
-pub fn build_args(token_file: &Path, addr_file: &Path, parent_pid: Option<u32>) -> Vec<String> {
+/// `splitter run --ui --token-file P --addr-file P2 --error-file P3 [--parent-pid PID]` (api/desktop/API.md).
+pub fn build_args(token_file: &Path, addr_file: &Path, error_file: &Path, parent_pid: Option<u32>) -> Vec<String> {
     let mut a = vec![
         "run".to_string(),
         "--ui".to_string(),
@@ -54,6 +54,8 @@ pub fn build_args(token_file: &Path, addr_file: &Path, parent_pid: Option<u32>) 
         token_file.to_string_lossy().into_owned(),
         "--addr-file".to_string(),
         addr_file.to_string_lossy().into_owned(),
+        "--error-file".to_string(),
+        error_file.to_string_lossy().into_owned(),
     ];
     if let Some(pid) = parent_pid {
         a.push("--parent-pid".to_string());
@@ -285,9 +287,23 @@ mod tests {
 
     #[test]
     fn args_follow_the_cli_contract() {
-        let a = build_args(Path::new("/run/api.token"), Path::new("/run/api.addr"), Some(4242));
-        assert_eq!(a, ["run", "--ui", "--token-file", "/run/api.token", "--addr-file", "/run/api.addr", "--parent-pid", "4242"]);
-        let a = build_args(Path::new("t"), Path::new("a"), None);
+        let a = build_args(Path::new("/run/api.token"), Path::new("/run/api.addr"), Path::new("/run/engine-error.txt"), Some(4242));
+        assert_eq!(
+            a,
+            [
+                "run",
+                "--ui",
+                "--token-file",
+                "/run/api.token",
+                "--addr-file",
+                "/run/api.addr",
+                "--error-file",
+                "/run/engine-error.txt",
+                "--parent-pid",
+                "4242"
+            ]
+        );
+        let a = build_args(Path::new("t"), Path::new("a"), Path::new("e"), None);
         assert!(!a.contains(&"--parent-pid".to_string()));
         // The token itself is never an argument.
         assert!(!a.iter().any(|x| x == "--token"));

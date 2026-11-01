@@ -260,7 +260,7 @@ DNS reject notification (from D1, `docs/REVIEW-DECIDE.md`):
 ## 3. Not in this plan
 
 - Strategy discovery for the desync engine (the "future strategy finder"); `Strategy` comes from config.
-- Per-domain route overrides and list editing from the UI (after M12, separate decision).
+- Per-domain route overrides: done 2026-11-01 (user-approved, Go side; `internal/pc/sites`, `api/desktop/API.md` "Per-site rules"). List-file editing from the UI: still not planned.
 - The Tauri app itself (its own tree, see ADR 0003 Open).
 - Service installation (Windows service, systemd unit); v1 uses a UAC/pkexec prompt per connect (ADR 0003).
 - The lab scenarios (`lab/*`); nfqws gets its real-packet test there.

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::client::{Ack, Activated, Api, Logs, Server, ServerTest, TestRequest, Version};
+use crate::client::{Ack, Activated, Api, Logs, Server, ServerTest, SiteRule, TestRequest, Version};
 use crate::engine::Manager;
 use crate::error::ApiError;
 use crate::sse::{EngineEvent, EventSink};
@@ -134,4 +134,21 @@ pub async fn servers_delete(state: State<'_, AppState>, id: String) -> Result<Ac
 #[tauri::command]
 pub async fn servers_test(state: State<'_, AppState>, request: TestRequest) -> Result<ServerTest, ApiError> {
     with_api(&state, |a| async move { a.test_server(&request).await }).await
+}
+
+#[tauri::command]
+pub async fn sites_list(state: State<'_, AppState>) -> Result<Vec<SiteRule>, ApiError> {
+    with_api(&state, |a| async move { a.sites().await }).await
+}
+
+/// Adds or changes the rule of a site. `action` is `direct`, `desync`, `tunnel` or `block`.
+#[tauri::command]
+pub async fn site_set(state: State<'_, AppState>, domain: String, action: String) -> Result<SiteRule, ApiError> {
+    with_api(&state, |a| async move { a.set_site(&domain, &action).await }).await
+}
+
+/// Removes the rule of a site (back to automatic).
+#[tauri::command]
+pub async fn site_delete(state: State<'_, AppState>, domain: String) -> Result<Ack, ApiError> {
+    with_api(&state, |a| async move { a.delete_site(&domain).await }).await
 }

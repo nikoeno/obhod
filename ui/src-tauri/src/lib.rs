@@ -6,6 +6,7 @@
 
 pub mod client;
 pub mod commands;
+pub mod diag;
 pub mod engine;
 pub mod error;
 pub mod http;
@@ -54,6 +55,9 @@ pub fn run() {
             commands::servers_activate,
             commands::servers_delete,
             commands::servers_test,
+            commands::sites_list,
+            commands::site_set,
+            commands::site_delete,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the app");

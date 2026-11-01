@@ -32,6 +32,12 @@ type engine interface {
 	ActivateServer(ctx context.Context, id string) (reloaded bool, err error)
 	DeleteServer(ctx context.Context, id string) error
 	TestServer(ctx context.Context, id, input string) (protocol string, err error)
+
+	// Per-site rules (user-approved 2026-11-01). The gateway reaches the rule type
+	// only through the pc.SiteRule alias; pc validates, stores and applies.
+	Sites() ([]pc.SiteRule, error)
+	SetSite(domain, action string) (rule pc.SiteRule, created bool, err error)
+	DeleteSite(domain string) error
 }
 
 var _ engine = (*pc.App)(nil)

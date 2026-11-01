@@ -75,6 +75,7 @@ describe('store with the fake backend', () => {
     expect(await store.init()).toBe(false);
     expect(store.S.engineDown).toBe(true);
     expect(store.S.startError?.code).toBe('engine_unreachable');
+    expect(store.S.startError?.details).toContain('engine output:'); // what the Details box shows
     await store.toggleConnection(); // not a refused permission: nothing happens
     expect(store.S.state).toBe('disconnected');
     expect(await store.restartEngine()).toBe(true);
@@ -313,5 +314,112 @@ describe('data behind Sites, Activity and Help', () => {
     expect(store.S.series.desync).toEqual([0]);
     expect(store.S.traffic).toEqual({ uploadTotal: 10, downloadTotal: 100, connections: 3 });
     expect(store.S.snapshot!.Traffic.direct).toBe(50);
+  });
+});
+
+describe('per-site rules in the store', () => {
+  it('adds a rule for an unlisted site, then reads rules and table again', async () => {
+    const { store } = makeStore();
+    await store.init();
+    expect(store.S.sites).toEqual([]);
+    const rule = await store.setSite('new-site.example', 'block');
+    expect(rule).toMatchObject({ domain: 'new-site.example', action: 'block' });
+    expect(store.S.sites.map((r) => r.domain)).toEqual(['new-site.example']);
+    const row = store.S.routes.find((r) => r.domain === 'new-site.example');
+    expect(row).toMatchObject({ route: 'block', source: 'user' });
+  });
+
+  it('a rule that only changes the source still shows after the refetch (no routes event)', async () => {
+    const { store } = makeStore();
+    await store.init();
+    const before = store.S.routes.find((r) => r.domain === 'social.example')!;
+    expect(before).toMatchObject({ route: 'tunnel', source: 'checked' });
+    await store.setSite('social.example', 'tunnel');
+    expect(store.S.routes.find((r) => r.domain === 'social.example')).toMatchObject({ route: 'tunnel', source: 'user' });
+  });
+
+  it('deleting a rule restores a listed site and removes an unlisted one', async () => {
+    const { store } = makeStore();
+    await store.init();
+    await store.setSite('news.example', 'block');
+    await store.setSite('new-site.example', 'desync');
+    await store.removeSite('news.example');
+    await store.removeSite('new-site.example');
+    expect(store.S.sites).toEqual([]);
+    expect(store.S.routes.find((r) => r.domain === 'news.example')).toMatchObject({ route: 'direct', source: 'checked' });
+    expect(store.S.routes.some((r) => r.domain === 'new-site.example')).toBe(false);
+  });
+
+  it('a check does not move a site that has a rule', async () => {
+    const { store, backend } = makeStore();
+    await store.init();
+    await store.setSite('news.example', 'direct');
+    for (const r of store.S.routes) if (r.domain !== 'news.example' && (r.route === 'direct' || r.route === 'desync')) await store.setSite(r.domain, r.route);
+    await backend.checkNow();
+    await flush(20);
+    await store.refresh();
+    expect(store.S.routes.filter((r) => r.source === 'user').every((r) => r.route === 'direct' || r.route === 'desync')).toBe(true);
+    expect(store.S.routes.find((r) => r.domain === 'news.example')!.route).toBe('direct');
+  });
+
+  it('rejects what the engine rejects, with fixed sentences and no echo of the input', async () => {
+    const { store } = makeStore();
+    await store.init();
+    for (const bad of ['https://x.example/p', 'x.example:8080', '192.0.2.1', '*.x.example/a', 'a b.example', '']) {
+      const e = await store.setSite(bad, 'block').catch((x: unknown) => x);
+      expect(e, bad).toBeInstanceOf(BackendError);
+      expect((e as BackendError).code).toBe(bad === '' ? 'bad_request' : 'invalid_input');
+      expect((e as BackendError).message).not.toContain(bad || '\u0000');
+    }
+    const e = await store.setSite('x.example', 'proxy' as never).catch((x: unknown) => x);
+    expect((e as BackendError).code).toBe('invalid_input');
+    expect(store.S.sites).toEqual([]);
+  });
+
+  it('accepts a leading wildcard or dot like list files and stores the normalized name', async () => {
+    const { store } = makeStore();
+    await store.init();
+    expect((await store.setSite('*.Mixed.Example.', 'direct')).domain).toBe('mixed.example');
+    expect((await store.setSite('.other.example', 'direct')).domain).toBe('other.example');
+  });
+
+  it('stops at 500 rules but still updates an existing one', async () => {
+    const { store } = makeStore();
+    await store.init();
+    for (let i = 0; i < 500; i++) await store.setSite(`r${i}.example`, 'direct');
+    const e = await store.setSite('one-more.example', 'direct').catch((x: unknown) => x);
+    expect((e as BackendError).code).toBe('limit_reached');
+    expect((await store.setSite('r0.example', 'block')).action).toBe('block');
+    expect(store.S.sites).toHaveLength(500);
+  });
+
+  it('deleting a missing rule is not_found and refreshes the list', async () => {
+    const { store } = makeStore();
+    await store.init();
+    const e = await store.removeSite('nothing.example').catch((x: unknown) => x);
+    expect((e as BackendError).code).toBe('not_found');
+    const e2 = await store.removeSite('https://nothing.example').catch((x: unknown) => x);
+    expect((e2 as BackendError).code).toBe('invalid_input');
+  });
+
+  it('a rule shows up as a routes event for the change and as Recent', async () => {
+    const { store } = makeStore();
+    await store.init();
+    const seen: string[] = [];
+    await store.backend.onEvent((ev) => {
+      if (ev.kind === 'routes') seen.push(...ev.data.changes.map((c) => `${c.Domain}:${c.From}>${c.To}`));
+    });
+    await store.setSite('news.example', 'desync');
+    await store.setSite('news.example', 'desync');
+    expect(seen).toEqual(['news.example:direct>desync']);
+  });
+
+  it('site calls while the engine is gone mark it down', async () => {
+    const { store, backend } = makeStore();
+    await store.init();
+    backend.dev!.setScenario('engine-unreachable');
+    const e = await store.setSite('x.example', 'block').catch((x: unknown) => x);
+    expect((e as BackendError).code).toBe('engine_unreachable');
+    expect(store.S.engineDown).toBe(true);
   });
 });

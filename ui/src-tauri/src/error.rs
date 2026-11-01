@@ -18,11 +18,21 @@ pub struct ApiError {
     /// Only for `needs_setup`: the commands the human must run once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commands: Option<Vec<String>>,
+    /// Only for a failed engine start: sanitized facts and the engine's own error text, for the
+    /// "Details" box (`diag.rs`). Never the token, addresses or user directories.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
 }
 
 impl ApiError {
     pub fn new(code: &str, message: &str) -> Self {
-        Self { code: code.to_string(), message: message.to_string(), commands: None }
+        Self { code: code.to_string(), message: message.to_string(), commands: None, details: None }
+    }
+
+    /// Adds the details text.
+    pub fn with_details(mut self, details: String) -> Self {
+        self.details = Some(details);
+        self
     }
 
     /// The engine cannot be reached (not started, gone, refused the token, timed out).
@@ -68,5 +78,7 @@ mod tests {
         let mut e = ApiError::new("needs_setup", "Setup.");
         e.commands = Some(vec!["a".into(), "b".into()]);
         assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"code":"needs_setup","message":"Setup.","commands":["a","b"]}"#);
+        let e = ApiError::engine_unreachable("Down.").with_details("stage: x".into());
+        assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"code":"engine_unreachable","message":"Down.","details":"stage: x"}"#);
     }
 }

@@ -99,3 +99,20 @@ describe('side panel', () => {
     expect(historyRows(undefined)).toEqual([]);
   });
 });
+
+describe('rules of the user', () => {
+  it('words the source "user" as Set by you', () => {
+    expect(sourceWord('user')).toBe('Set by you');
+    const f = panelFacts(r('ads.example', 'block', { source: 'user' }), NOW);
+    expect(f).toMatchObject({ decided: 'Set by you', byUser: true, word: 'Blocked by you', engine: 'block' });
+    expect(panelFacts(r('ads.example', 'block'), NOW).byUser).toBe(false);
+  });
+
+  it('puts a rule for block under Blocked by you, following the route the engine reports', () => {
+    const rows = [...table, r('mine.example', 'block', { source: 'user' }), r('own.example', 'tunnel', { source: 'user' })];
+    const tabs = siteTabs(rows);
+    expect(tabs.find((t) => t.id === 'block')).toMatchObject({ label: 'Blocked by you', count: 1 });
+    expect(tabs.find((t) => t.id === 'tunnel')?.count).toBe(2);
+    expect(filterSites(rows, 'block', '').map((x) => x.domain)).toEqual(['mine.example']);
+  });
+});

@@ -1,10 +1,13 @@
 <script setup lang="ts">
-// Sites: what the app decided for each site (docs/UI.md 5.2). Read-only in v1.
+// Sites: what the app decided for each site, and the user's own rules (docs/UI.md 5.2).
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { actions, pages } from '../../design/copy';
+import SiteRuleDialog from '../components/SiteRuleDialog.vue';
 import Tabs from '../components/Tabs.vue';
 import { isLearning } from '../lib/errors';
 import { fmtAgo } from '../lib/format';
+import { hasRule, initialAction, ruleText, siteErrorText } from '../lib/siteRules';
+import { toast } from '../lib/toast';
 import { countLine, effectiveFilter, emptyText, filterSites, historyRows, listView, panelFacts, parseFilter, siteTabs, sourceWord, routeWord, type SiteFilter } from '../lib/sitesModel';
 import { route } from '../router';
 import { useStore } from '../store';
@@ -43,12 +46,43 @@ const site = computed(() => (selected.value ? (S.routes.find((r) => r.domain ===
 const facts = computed(() => (site.value ? panelFacts(site.value) : null));
 const history = computed(() => historyRows(site.value?.history));
 const checkingThis = computed(() => !!site.value && S.checking && !!S.checkingDomains?.includes(site.value.domain));
+const ruled = computed(() => !!site.value && hasRule(site.value, S.sites));
+const ruleDialog = ref<'add' | 'use' | null>(null);
+const ruleMsg = ref('');
+const removing = ref(false);
 const allChecking = computed(() => S.checking && !S.checkingDomains);
 
 async function open(domain: string): Promise<void> {
   selected.value = domain;
+  ruleMsg.value = '';
   await nextTick();
   panel.value?.focus();
+}
+
+function onRuleClosed(rule: { domain: string } | null): void {
+  const kind = ruleDialog.value;
+  ruleDialog.value = null;
+  if (rule && kind === 'add') {
+    // Show the new rule: all paths, no search, panel open on it.
+    filter.value = 'all';
+    query.value = '';
+    selected.value = rule.domain;
+  }
+}
+
+async function removeRule(): Promise<void> {
+  const domain = site.value?.domain;
+  if (!domain || removing.value) return;
+  removing.value = true;
+  ruleMsg.value = '';
+  try {
+    await store.removeSite(domain);
+    toast(ruleText.removed(domain));
+  } catch (e) {
+    ruleMsg.value = siteErrorText(e as { code?: string; message?: string });
+  } finally {
+    removing.value = false;
+  }
 }
 
 function close(): void {
@@ -89,8 +123,7 @@ onBeforeUnmount(() => clearInterval(tick));
       <input id="site-search" v-model="query" type="search" class="search" :placeholder="t.search" :aria-label="t.search" aria-keyshortcuts="Control+F" autocomplete="off" spellcheck="false" />
       <span class="grow"></span>
       <button class="btn" type="button" aria-keyshortcuts="Control+R" :disabled="S.checking || S.engineDown" @click="store.checkNow()">{{ allChecking ? actions.checking : actions.checkAll }}</button>
-      <button class="btn" type="button" disabled aria-describedby="add-later">{{ t.addSite }}</button>
-      <span id="add-later" class="later">{{ actions.later }}</span>
+      <button class="btn" type="button" :disabled="S.engineDown" @click="ruleDialog = 'add'">{{ t.addSite }}</button>
     </div>
     <p class="muted small" aria-live="polite">{{ status }}</p>
 
@@ -143,11 +176,15 @@ onBeforeUnmount(() => clearInterval(tick));
         </ul>
         <p v-else class="muted small">{{ pages.activity.noChanges }}</p>
         <div class="stack">
-          <button class="btn primary" type="button" :disabled="S.checking || S.engineDown" @click="store.checkNow([site.domain])">{{ checkingThis ? actions.checking : actions.checkSite }}</button>
-          <button class="btn" type="button" disabled aria-describedby="always-later">{{ t.panel.alwaysUse }}</button>
-          <span id="always-later" class="later">{{ t.alwaysUseLater }}</span>
+          <button class="btn primary" type="button" :disabled="S.checking || S.engineDown || facts.byUser" @click="store.checkNow([site.domain])">{{ checkingThis ? actions.checking : actions.checkSite }}</button>
+          <button class="btn" type="button" :disabled="S.engineDown" @click="ruleDialog = 'use'">{{ t.panel.alwaysUse }}</button>
+          <button v-if="ruled" class="btn" type="button" :disabled="S.engineDown || removing" @click="removeRule">{{ t.panel.removeRule }}</button>
         </div>
+        <p v-if="facts.byUser" class="muted small">{{ t.panel.ruleNote }}</p>
+        <p class="form-msg err" role="status" aria-live="polite">{{ ruleMsg }}</p>
       </aside>
     </div>
+    <SiteRuleDialog v-if="ruleDialog === 'add'" @close="onRuleClosed" />
+    <SiteRuleDialog v-else-if="ruleDialog === 'use' && site" :domain="site.domain" :current="initialAction(site.route)" @close="onRuleClosed" />
   </section>
 </template>

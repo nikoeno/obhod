@@ -66,6 +66,10 @@ export interface Ack { ok: boolean; state?: ConnState; checking?: boolean }
 /** Exactly one of the two. */
 export type TestRequest = { id: string; input?: undefined } | { input: string; id?: undefined };
 
+/** The four things a rule can do. "No rule" is made by deleting the rule. */
+export type SiteAction = 'direct' | 'desync' | 'tunnel' | 'block';
+export interface SiteRule { domain: string; action: SiteAction; addedAt: string }
+
 export interface Traffic {
   uploadTotal: number;
   downloadTotal: number;
@@ -91,11 +95,14 @@ export type EngineEvent =
 export class BackendError extends Error {
   readonly code: string;
   readonly commands?: string[];
-  constructor(code: string, message: string, commands?: string[]) {
+  /** Only for a failed engine start: sanitized facts and the engine's own error text (shown under "Details"). */
+  readonly details?: string;
+  constructor(code: string, message: string, commands?: string[], details?: string) {
     super(message);
     this.name = 'BackendError';
     this.code = code;
     this.commands = commands;
+    this.details = details;
   }
 }
 
@@ -135,6 +142,12 @@ export interface Backend {
   activateServer(id: string): Promise<Activated>;
   deleteServer(id: string): Promise<Ack>;
   testServer(request: TestRequest): Promise<ServerTest>;
+  /** The user's per-site rules, sorted by domain. */
+  listSites(): Promise<SiteRule[]>;
+  /** Adds or changes a rule. The domain must already be a plain name (the UI cleans pasted input). */
+  setSite(domain: string, action: SiteAction): Promise<SiteRule>;
+  /** Removes a rule (back to automatic). Rejects with `not_found` when there is none. */
+  deleteSite(domain: string): Promise<Ack>;
   /** Subscribes to engine events; resolves to an unsubscribe function. */
   onEvent(handler: (event: EngineEvent) => void): Promise<() => void>;
   dev?: DevControls;

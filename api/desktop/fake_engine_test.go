@@ -33,6 +33,7 @@ type fakeEngine struct {
 	checkErr error
 	logsErr  error
 	srv      srvState
+	site     siteState
 
 	// connectHook runs inside Connect (state connecting) and decides its result.
 	connectHook func(ctx context.Context) error
@@ -426,4 +427,130 @@ func (f *fakeEngine) TestServer(_ context.Context, id, input string) (string, er
 		return test(id, input)
 	}
 	return "vless", nil
+}
+
+// siteState is the fake's list of site rules. It mirrors pc: the domain is
+// normalized like list entries (route.Normalize after a leading "*." or "."),
+// four actions, 500 rules at most.
+type siteState struct {
+	rules   []pc.SiteRule
+	lastDom string // the last domain passed to SetSite or DeleteSite (for the leak tests)
+	err     map[string]error
+}
+
+func (f *fakeEngine) failSiteCall(method string, err error) {
+	f.mu.Lock()
+	if f.site.err == nil {
+		f.site.err = map[string]error{}
+	}
+	f.site.err[method] = err
+	f.mu.Unlock()
+}
+
+func (f *fakeEngine) siteErr(method string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.site.err[method]
+}
+
+func (f *fakeEngine) setSites(rules ...pc.SiteRule) {
+	f.mu.Lock()
+	f.site.rules = rules
+	f.mu.Unlock()
+}
+
+// setAction assigns an action by name without naming the sites package (the
+// gateway's tests do not import it).
+func setAction(r *pc.SiteRule, action string) {
+	switch action {
+	case "direct":
+		r.Action = "direct"
+	case "desync":
+		r.Action = "desync"
+	case "tunnel":
+		r.Action = "tunnel"
+	case "block":
+		r.Action = "block"
+	}
+}
+
+func fakeRule(domain, action string, i int) pc.SiteRule {
+	r := pc.SiteRule{Domain: domain, AddedAt: t0.Add(time.Duration(i) * time.Minute)}
+	setAction(&r, action)
+	return r
+}
+
+func fakeNormalize(d string) (string, error) {
+	d = strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(d), "*."), ".")
+	n, err := route.Normalize(d)
+	if err != nil {
+		return "", pc.ErrSiteDomain
+	}
+	return n, nil
+}
+
+func (f *fakeEngine) Sites() ([]pc.SiteRule, error) {
+	f.call("Sites")
+	if err := f.siteErr("Sites"); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pc.SiteRule{}, f.site.rules...), nil
+}
+
+func (f *fakeEngine) SetSite(domain, action string) (pc.SiteRule, bool, error) {
+	f.call("SetSite action=" + action)
+	f.mu.Lock()
+	f.site.lastDom = domain
+	f.mu.Unlock()
+	if err := f.siteErr("SetSite"); err != nil {
+		return pc.SiteRule{}, false, err
+	}
+	d, err := fakeNormalize(domain)
+	if err != nil {
+		return pc.SiteRule{}, false, err
+	}
+	switch action {
+	case "direct", "desync", "tunnel", "block":
+	default:
+		return pc.SiteRule{}, false, pc.ErrSiteAction
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, r := range f.site.rules {
+		if r.Domain == d {
+			setAction(&f.site.rules[i], action)
+			return f.site.rules[i], false, nil
+		}
+	}
+	if len(f.site.rules) >= 500 {
+		return pc.SiteRule{}, false, pc.ErrSiteLimit
+	}
+	r := fakeRule(d, action, len(f.site.rules)+1)
+	f.site.rules = append(f.site.rules, r)
+	return r, true, nil
+}
+
+func (f *fakeEngine) DeleteSite(domain string) error {
+	f.call("DeleteSite")
+	f.mu.Lock()
+	f.site.lastDom = domain
+	f.mu.Unlock()
+	if err := f.siteErr("DeleteSite"); err != nil {
+		return err
+	}
+	d, err := fakeNormalize(domain)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, r := range f.site.rules {
+		if r.Domain == d {
+			f.site.rules = append(f.site.rules[:i:i], f.site.rules[i+1:]...)
+			return nil
+		}
+	}
+	return pc.ErrSiteNotFound
 }

@@ -31,7 +31,11 @@ func checkListen(addr string) error {
 }
 
 // writeAddrFile writes addr to path atomically with mode 0600.
-func writeAddrFile(path, addr string) error {
+func writeAddrFile(path, addr string) error { return writeFileAtomic(path, addr) }
+
+// writeFileAtomic writes text to path through a private temporary file and a
+// rename, so a reader sees the old file or the whole new one, never half.
+func writeFileAtomic(path, text string) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*")
 	if err != nil {
 		return err
@@ -43,7 +47,7 @@ func writeAddrFile(path, addr string) error {
 		return err
 	}
 	// CreateTemp makes the file 0600 (owner-only) already.
-	if _, err := tmp.WriteString(addr); err != nil {
+	if _, err := tmp.WriteString(text); err != nil {
 		return fail(err)
 	}
 	if err := tmp.Close(); err != nil {

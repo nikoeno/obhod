@@ -6,7 +6,8 @@ import type { Route } from '../backend/types';
 import Icon from '../components/Icon.vue';
 import { errorInfo, isLearning } from '../lib/errors';
 import { fmtAgo, fmtBytes, fill, pct, plural } from '../lib/format';
-import { buttonModel, setupCard, subAction } from '../lib/homeModel';
+import { copyText } from '../lib/clipboard';
+import { buttonModel, setupCard, startDetails, subAction } from '../lib/homeModel';
 import { fanPaths } from '../lib/icons';
 import { loadSetting, saveSetting } from '../lib/settings';
 import { serverText, serverErrorText } from '../lib/serverText';
@@ -28,6 +29,12 @@ const bigClass = computed(() => {
   return ['big', { on: m.look === 'on', busy: m.look === 'busy' || m.look === 'busy-dim', dim: m.look === 'busy-dim', off: m.look === 'off', err: !!m.err && m.look === 'idle' }];
 });
 const action = computed(() => subAction(model.value, S.engineDown, S.startError));
+
+const details = computed(() => startDetails(S.engineDown, S.startError));
+async function copyDetails(): Promise<void> {
+  if (!details.value) return;
+  toast((await copyText(details.value)) ? pages.home.startDetails.copied : pages.home.startDetails.copyFailed);
+}
 
 const skipped = ref(loadSetting('detourSkipped', false));
 const card = computed(() => setupCard({ engineDown: S.engineDown, serversLoaded: S.serversLoaded, servers: S.servers, skipped: skipped.value }));
@@ -126,6 +133,12 @@ async function useServer(id: string, name: string): Promise<void> {
         <button v-else-if="action === 'log'" class="btn" type="button" @click="showLogDialog()">{{ actions.showLog }}</button>
         <button v-else-if="action === 'detour'" class="btn" type="button" @click="go('settings', { tab: 'detour' })">{{ actions.openDetour }}</button>
       </div>
+      <details v-if="details" class="start-details">
+        <summary>{{ pages.home.startDetails.summary }}</summary>
+        <p class="muted">{{ pages.home.startDetails.hint }}</p>
+        <pre class="code" tabindex="0" :aria-label="pages.home.startDetails.label">{{ details }}</pre>
+        <button class="btn small" type="button" @click="copyDetails">{{ actions.copy }}</button>
+      </details>
     </div>
 
     <template v-if="!S.engineDown">
