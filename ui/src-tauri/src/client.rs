@@ -91,6 +91,48 @@ const SITE_LIMIT: &str = "The list of site rules is full. Remove a rule first.";
 const SITE_NOT_FOUND: &str = "There is no rule for that site.";
 const SITE_BAD_REQUEST: &str = "The engine did not accept this site rule.";
 
+/// One tried preset of a search: how many of the searched sites it reached. Catalogue id and counts only.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesyncTry {
+    pub preset: String,
+    pub fixed: u32,
+    pub total: u32,
+}
+
+/// The last finished search of this run (`GET /desync`, `lastSearch`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesyncSearch {
+    pub at: String,
+    pub tried: Vec<DesyncTry>,
+    pub chosen: String,
+    pub outcome: String,
+}
+
+/// `GET /desync` and the answer of `POST /desync`. `mode` is `preset`, `auto` or `custom`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Desync {
+    pub mode: String,
+    pub preset: String,
+    pub searching: bool,
+    pub last_search: Option<DesyncSearch>,
+}
+
+/// An entry of `GET /desync/presets`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesyncPreset {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+/// `POST /desync/search` answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesyncStarted {
+    pub ok: bool,
+    pub searching: bool,
+}
+
 /// What `POST /servers/test` takes: exactly one of the two.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -261,6 +303,31 @@ impl Api {
         parse(&self.raw("DELETE", &format!("/sites/{}", path_segment(domain)), None).await.map_err(site_error)?)
     }
 
+    /// `GET /desync`: the choice, the preset in use and the last search.
+    pub async fn desync(&self) -> Result<Desync, ApiError> {
+        parse(&self.raw("GET", "/desync", None).await?)
+    }
+
+    /// `GET /desync/presets`: the catalogue in display order.
+    pub async fn desync_presets(&self) -> Result<Vec<DesyncPreset>, ApiError> {
+        parse(&self.raw("GET", "/desync/presets", None).await?)
+    }
+
+    /// `POST /desync`: `preset` is `auto`, `custom` or a catalogue id. Checked here (lowercase letters,
+    /// digits and `-`, at most 64) so nothing else is sent; the engine knows the ids.
+    pub async fn set_desync(&self, preset: &str) -> Result<Desync, ApiError> {
+        if !desync_id_ok(preset) {
+            return Err(ApiError::new("invalid_input", DESYNC_INVALID));
+        }
+        let body = json!({ "preset": preset });
+        parse(&self.raw("POST", "/desync", Some(&body)).await.map_err(desync_error)?)
+    }
+
+    /// `POST /desync/search`: starts a search now (202). Progress arrives as `desync` events.
+    pub async fn start_desync_search(&self) -> Result<DesyncStarted, ApiError> {
+        parse(&self.raw("POST", "/desync/search", None).await?)
+    }
+
     pub async fn test_server(&self, req: &TestRequest) -> Result<ServerTest, ApiError> {
         if req.id.is_some() == req.input.is_some() {
             return Err(ApiError::bad_request("Send either an id or an input."));
@@ -268,6 +335,20 @@ impl Api {
         let body = serde_json::to_value(req).map_err(|_| ApiError::internal())?;
         parse(&self.raw("POST", "/servers/test", Some(&body)).await?)
     }
+}
+
+const DESYNC_INVALID: &str = "That is not a desync preset. Use auto or an id from the preset list.";
+
+fn desync_id_ok(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// A desync call that fails with `invalid_input` always shows the fixed sentence.
+fn desync_error(mut e: ApiError) -> ApiError {
+    if e.code == "invalid_input" {
+        e.message = DESYNC_INVALID.to_string();
+    }
+    e
 }
 
 /// Replaces the message of the codes site calls can fail with by a fixed sentence.
@@ -639,5 +720,63 @@ mod tests {
         let e = api.set_site("example.com", "block").await.unwrap_err();
         let shown = format!("{e} {e:?} {}", serde_json::to_string(&e).unwrap());
         assert!(!shown.contains(TOKEN));
+    }
+
+    #[tokio::test]
+    async fn desync_endpoints_parse_their_golden_files() {
+        let (srv, api) = setup().await;
+        srv.reply("GET", "/api/v1/desync", 200, &testdata("desync_preset.golden.json"));
+        let d = api.desync().await.unwrap();
+        assert_eq!((d.mode.as_str(), d.preset.as_str(), d.searching), ("preset", "alt2-multisplit", false));
+        assert!(d.last_search.is_none());
+        srv.reply("GET", "/api/v1/desync", 200, &testdata("desync_auto_searching.golden.json"));
+        let d = api.desync().await.unwrap();
+        assert!(d.searching);
+        let l = d.last_search.unwrap();
+        assert_eq!((l.chosen.as_str(), l.outcome.as_str(), l.tried.len()), ("alt3-hostfakesplit", "chosen", 2));
+        assert_eq!((l.tried[1].fixed, l.tried[1].total), (3, 3));
+        srv.reply("GET", "/api/v1/desync/presets", 200, &testdata("desync_presets.golden.json"));
+        let ps = api.desync_presets().await.unwrap();
+        assert_eq!(ps[0].id, "alt2-multisplit");
+        assert!(!ps[0].description.is_empty());
+    }
+
+    #[tokio::test]
+    async fn set_desync_sends_the_preset_and_validates_it_first() {
+        let (srv, api) = setup().await;
+        srv.reply("POST", "/api/v1/desync", 200, &testdata("desync_set_preset.golden.json"));
+        let d = api.set_desync("alt3-hostfakesplit").await.unwrap();
+        assert_eq!(d.preset, "alt3-hostfakesplit");
+        let sent = srv.requests().last().unwrap().clone();
+        assert_eq!(sent.path, "/api/v1/desync");
+        assert!(String::from_utf8_lossy(&sent.body).contains(r#""preset":"alt3-hostfakesplit""#));
+        let before = srv.requests().len();
+        for bad in ["", "../x", "ALT2", "a b", &"x".repeat(65)] {
+            assert_eq!(api.set_desync(bad).await.unwrap_err().code, "invalid_input", "{bad}");
+        }
+        assert_eq!(srv.requests().len(), before);
+    }
+
+    #[tokio::test]
+    async fn desync_errors_map_to_their_codes() {
+        let (srv, api) = setup().await;
+        let cases = [
+            ("/api/v1/desync", 422, "error_desync_invalid_preset.golden.json", "invalid_input"),
+            ("/api/v1/desync", 422, "error_desync_program_missing.golden.json", "program_missing"),
+            ("/api/v1/desync/search", 409, "error_desync_search_busy.golden.json", "busy"),
+            ("/api/v1/desync/search", 409, "error_desync_not_auto.golden.json", "not_auto"),
+            ("/api/v1/desync/search", 409, "error_desync_no_domains.golden.json", "no_domains"),
+        ];
+        for (path, status, file, code) in cases {
+            srv.reply("POST", path, status, &testdata(file));
+            let e = if path.ends_with("search") { api.start_desync_search().await.unwrap_err() } else { api.set_desync("alt2-multisplit").await.unwrap_err() };
+            assert_eq!(e.code, code, "{file}");
+        }
+        srv.reply("POST", "/api/v1/desync", 422, r#"{"error":"bad: secret","code":"invalid_input"}"#);
+        let e = api.set_desync("alt2-multisplit").await.unwrap_err();
+        assert_eq!(e.message, DESYNC_INVALID);
+        srv.reply("POST", "/api/v1/desync/search", 202, &testdata("desync_search_started.golden.json"));
+        let r = api.start_desync_search().await.unwrap();
+        assert!(r.ok && r.searching);
     }
 }

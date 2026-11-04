@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
   BackendError,
-  type Ack, type Activated, type Backend, type EngineEvent, type EngineState, type LogName, type Logs,
+  type Ack, type Activated, type Backend, type Desync, type DesyncPreset, type DesyncStarted, type EngineEvent, type EngineState, type LogName, type Logs,
   type ProcessInfo, type RouteInfo, type Server, type ServerTest, type SiteAction, type SiteRule, type TestRequest, type Version,
 } from './types';
 
@@ -59,6 +59,10 @@ export function createTauriBackend(run: Run = defaultRun, listenFn: typeof liste
     listSites: () => run<SiteRule[]>('sites_list'),
     setSite: (domain: string, action: SiteAction) => run<SiteRule>('site_set', { domain, action }),
     deleteSite: (domain: string) => run<Ack>('site_delete', { domain }),
+    getDesync: () => run<Desync>('desync_get'),
+    getDesyncPresets: () => run<DesyncPreset[]>('desync_presets'),
+    setDesync: (preset: string) => run<Desync>('desync_set', { preset }),
+    startDesyncSearch: () => run<DesyncStarted>('desync_search'),
     onEvent: (handler) => listenFn<EngineEvent>('engine-event', (ev) => handler(ev.payload)),
   };
 }

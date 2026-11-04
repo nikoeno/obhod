@@ -5,8 +5,9 @@
 // mocked invoke layer; the app creates one store and provides it with `provideStore`.
 
 import { inject, reactive, type App, type InjectionKey } from 'vue';
-import { BackendError, type Activated, type Backend, type CheckEvent, type ConnState, type EngineEvent, type EngineErrorBody, type EngineState, type NetworkSeen, type Route, type RouteInfo, type Problem, type Server, type ServerTest, type SiteAction, type SiteRule, type Snapshot, type TestRequest, type Traffic } from './backend/types';
+import { BackendError, type Activated, type Backend, type CheckEvent, type ConnState, type Desync, type DesyncEvent, type DesyncPreset, type EngineEvent, type EngineErrorBody, type EngineState, type NetworkSeen, type Route, type RouteInfo, type Problem, type Server, type ServerTest, type SiteAction, type SiteRule, type Snapshot, type TestRequest, type Traffic } from './backend/types';
 import { mergeChanges } from './lib/activityModel';
+import { nextProgress, type DesyncProgress } from './lib/desyncModel';
 import { errorInfo, type ErrorInfo } from './lib/errors';
 import { createProblemHold, HIDE_DELAY_MS } from './lib/problems';
 import { routes as routeCopy } from '../design/copy';
@@ -34,6 +35,16 @@ export interface StoreState {
   serversLoaded: boolean;
   /** The user's per-site rules (`GET /sites`). */
   sites: SiteRule[];
+  /** `GET /desync`; null until read. */
+  desync: Desync | null;
+  /** The preset catalogue, in the engine's order (empty until read). */
+  desyncPresets: DesyncPreset[];
+  /** The first read of the choice and the catalogue worked. */
+  desyncLoaded: boolean;
+  /** Reading them failed (and the engine is up): the Settings tab offers a retry. */
+  desyncFailed: boolean;
+  /** Where a running search is (from `desync` events); null when none runs. */
+  desyncProgress: DesyncProgress | null;
   traffic: { uploadTotal: number; downloadTotal: number; connections: number };
   series: Record<(typeof SERIES_ROUTES)[number], number[]>;
   quit: boolean;
@@ -64,6 +75,11 @@ export function newState(): StoreState {
     servers: [],
     serversLoaded: false,
     sites: [],
+    desync: null,
+    desyncPresets: [],
+    desyncLoaded: false,
+    desyncFailed: false,
+    desyncProgress: null,
     traffic: { uploadTotal: 0, downloadTotal: 0, connections: 0 },
     series: { direct: [], tunnel: [], desync: [], proxy: [] },
     quit: false,
@@ -106,7 +122,10 @@ export function createStore(backend: Backend, deps: StoreDeps) {
     // The `degraded` flags of the table follow `Tunnel` (a server was added or the first one switched on): no `routes` event says so.
     if (S.loaded && prevTunnel !== p.snapshot?.Tunnel) void refreshRoutes();
     // There is no server event: a failed Start (tunnel_missing) or a switch may have changed the list.
-    if (prevState !== S.state) void refreshServers();
+    if (prevState !== S.state) {
+      void refreshServers();
+      void refreshDesync();
+    }
   }
 
   function setEngineDown(): void {
@@ -121,6 +140,7 @@ export function createStore(backend: Backend, deps: StoreDeps) {
     try {
       const [st, routes, servers, sites] = await Promise.all([backend.getState(), backend.getRoutes(), backend.listServers().catch(() => null), backend.listSites().catch(() => null)]);
       S.routes = routes;
+      void refreshDesync();
       if (sites) S.sites = sites;
       if (servers) {
         S.servers = servers;
@@ -151,6 +171,33 @@ export function createStore(backend: Backend, deps: StoreDeps) {
     const [sites, routes] = await Promise.all([backend.listSites().catch(() => null), backend.getRoutes().catch(() => null)]);
     if (sites) S.sites = sites;
     if (routes) S.routes = routes;
+  }
+
+  /** Reads the desync choice, and the catalogue until it is known. A failure only marks the tab for a retry. */
+  async function refreshDesync(): Promise<boolean> {
+    try {
+      const [info, presets] = await Promise.all([backend.getDesync(), S.desyncPresets.length ? Promise.resolve(S.desyncPresets) : backend.getDesyncPresets()]);
+      S.desync = info;
+      S.desyncPresets = presets;
+      if (!info.searching) S.desyncProgress = null;
+      S.desyncLoaded = true;
+      S.desyncFailed = false;
+      return true;
+    } catch (e) {
+      if (e instanceof BackendError && e.code === 'engine_unreachable') setEngineDown();
+      else if (!S.desyncLoaded) S.desyncFailed = true;
+      return false;
+    }
+  }
+
+  function onDesync(ev: DesyncEvent): void {
+    S.desyncProgress = nextProgress(S.desyncProgress, ev);
+    if (S.desync) S.desync.searching = ev.phase !== 'done';
+    if (ev.phase === 'done') {
+      // The result is in `GET /desync` (lastSearch) and in the table (`desync` states, moved sites).
+      void refreshDesync();
+      void refreshRoutes();
+    }
   }
 
   async function refreshRoutes(): Promise<void> {
@@ -206,6 +253,9 @@ export function createStore(backend: Backend, deps: StoreDeps) {
       case 'check':
         onCheck(ev.data);
         break;
+      case 'desync':
+        onDesync(ev.data);
+        break;
       case 'shutdown':
         // The last event before the engine closes the stream.
         if (!S.quit) setEngineDown();
@@ -213,6 +263,7 @@ export function createStore(backend: Backend, deps: StoreDeps) {
       case 'stream-open':
         // The engine keeps no replay buffer: the first state event is the truth; the table is refetched.
         void refreshRoutes();
+        void refreshDesync();
         break;
       case 'stream-lost':
         // Find out whether the engine is gone; the Rust side keeps reconnecting by itself.
@@ -384,6 +435,25 @@ export function createStore(backend: Backend, deps: StoreDeps) {
     await refreshSites();
   }
 
+  // Desync calls throw the BackendError; the Settings tab shows desyncErrorText(e).
+
+  /** Chooses `auto` or a catalogue id. The answer is the new state. */
+  async function setDesync(preset: string): Promise<Desync> {
+    const d = await guarded(backend.setDesync(preset));
+    S.desync = d;
+    S.desyncLoaded = true;
+    S.desyncFailed = false;
+    if (!d.searching) S.desyncProgress = null;
+    void refreshRoutes();
+    return d;
+  }
+
+  /** Starts a search now. Progress follows as `desync` events. */
+  async function searchDesync(): Promise<void> {
+    await guarded(backend.startDesyncSearch());
+    if (S.desync) S.desync.searching = true;
+  }
+
   /** Advanced settings: stop and start again so the engine picks up the change. */
   async function restartConnection(): Promise<boolean> {
     if (S.state !== 'connected') return false;
@@ -438,6 +508,9 @@ export function createStore(backend: Backend, deps: StoreDeps) {
     testServer,
     setSite,
     removeSite,
+    refreshDesync,
+    setDesync,
+    searchDesync,
     quit,
     routeCount,
     routeTraffic,

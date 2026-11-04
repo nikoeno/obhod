@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { actions, extraRoutes, mainRoutes, pages, routes as routeCopy } from '../../design/copy';
 import type { Route } from '../backend/types';
 import Icon from '../components/Icon.vue';
+import { homeLine } from '../lib/desyncModel';
 import { errorInfo, isLearning } from '../lib/errors';
 import { fmtAgo, fmtBytes, fill, pct, plural } from '../lib/format';
 import { copyText } from '../lib/clipboard';
@@ -66,6 +67,9 @@ const totalTraffic = computed(() => Object.values(S.snapshot?.Traffic ?? {}).red
 const savingsLine = computed(() =>
   !S.engineDown && S.snapshot && totalTraffic.value > 0 ? fill(pages.home.savings, { savings: pct(S.snapshot.Savings) }) : '',
 );
+
+// Which quiet fix the picky sites use (shown only while some site uses it).
+const desyncLine = computed(() => homeLine({ engineDown: S.engineDown, routed: store.routeCount('desync'), info: S.desync, presets: S.desyncPresets, progress: S.desyncProgress }));
 
 // Keeps "checked N min ago" fresh.
 const now = ref(Date.now());
@@ -178,6 +182,10 @@ async function useServer(id: string, name: string): Promise<void> {
         </button>
       </div>
       <p v-if="savingsLine" class="savings">{{ savingsLine }}</p>
+      <div v-if="desyncLine" class="desync-line">
+        <span role="status" :aria-label="`${desyncLine.label}: ${desyncLine.text}`">{{ desyncLine.text }}</span>
+        <button class="link" type="button" @click="go('settings', { tab: 'desync' })">{{ pages.home.desyncLine.change }}</button>
+      </div>
       <div v-if="S.snapshot" class="netline">
         <button class="link plain" type="button" :aria-label="`${netLabel}, ${checkedText}. Show network details`" @click="go('activity', { tab: 'network' })">
           <span>{{ netLabel }}</span><span class="muted"> · {{ checkedText }}</span>

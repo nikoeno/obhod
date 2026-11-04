@@ -1,4 +1,4 @@
-# Module: desktop
+﻿# Module: desktop
 
 | Field | Value |
 |---|---|
@@ -7,10 +7,10 @@
 | Binary | splitter |
 | Purpose | the splitter app: command line in front of the PC composition module (gateway for the desktop UI, ADR 0004) |
 | Consumers | cmd/splitter |
-| Children | – |
-| Uses libs | – |
+| Children | â€“ |
+| Uses libs | â€“ |
 | Uses modules | internal/pc, internal/pc/status, internal/lib/route, internal/lib/paths, internal/lib/version, internal/lib/netif (tests only), internal/lib/checker/lists (tests only) |
-| Build tags | – |
+| Build tags | â€“ |
 | Status | implemented: CLI and control API (ADR 0004 milestone 3, `internal/pc/PLAN.md` M12) and server-management endpoints (ADR 0004 milestone 4, `internal/pc/PLAN.md` M13); contracts below, approved by the human 2026-10-31; per-site rules (`/sites`, user-approved 2026-11-01, Go side only) |
 
 ## Responsibility
@@ -112,7 +112,7 @@ splitter run --ui --token-file PATH [--listen ADDR] [--addr-file PATH] [--error-
 - No CORS: no `Access-Control-*` header on any response; `OPTIONS` gets 405. Every response (errors too) carries `Content-Security-Policy: default-src 'self'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`.
 - Timeouts: `ReadHeaderTimeout` 5 s, `ReadTimeout` 10 s, `WriteTimeout` 15 s, `IdleTimeout` 60 s, `MaxHeaderBytes` 16 KiB. The SSE handler clears its own write deadline (`http.ResponseController`).
 - Request body: at most 64 KiB (`http.MaxBytesReader`), else 413 `too_large`. A body is optional on POSTs; if present it must be JSON (`Content-Type: application/json`, else 415 `bad_request`) with no unknown fields (400 `bad_request`). GETs take no body.
-- Check order: Host (403) → Bearer token (401) → route and method (404, 405 with `Allow`) → body → handler. An unknown path without a token is 401, so paths cannot be probed.
+- Check order: Host (403) â†’ Bearer token (401) â†’ route and method (404, 405 with `Allow`) â†’ body â†’ handler. An unknown path without a token is 401, so paths cannot be probed.
 - At most 4 open event streams (the 5th gets 429 `busy`).
 - All paths are under `/api/v1/`. JSON is UTF-8, `Content-Type: application/json; charset=utf-8`.
 
@@ -164,16 +164,16 @@ The Rust side also produces `permission_denied` (UAC or pkexec cancelled) and `e
 
 | Method | Path | Request | Success | Errors |
 |---|---|---|---|---|
-| GET | `/api/v1/state` | – | 200 State | 401 403 405 503 |
-| GET | `/api/v1/routes` | – | 200 `[Route]` | same |
-| GET | `/api/v1/processes` | – | 200 `[Process]` | same |
+| GET | `/api/v1/state` | â€“ | 200 State | 401 403 405 503 |
+| GET | `/api/v1/routes` | â€“ | 200 `[Route]` | same |
+| GET | `/api/v1/processes` | â€“ | 200 `[Process]` | same |
 | GET | `/api/v1/logs?name=` | `name` = `splitter` \| `sing-box` \| `desync` | 200 `{name, lines}` | 400 `bad_request` |
-| GET | `/api/v1/version` | – | 200 Version | same as state |
-| GET | `/api/v1/events` | – | 200 `text/event-stream` | 429 `busy` |
+| GET | `/api/v1/version` | â€“ | 200 Version | same as state |
+| GET | `/api/v1/events` | â€“ | 200 `text/event-stream` | 429 `busy` |
 | POST | `/api/v1/connect` | none | 202 `{ok, state:"connecting"}`; 200 `{ok, state}` if already connecting or connected | 409 `busy` while disconnecting |
-| POST | `/api/v1/disconnect` | none | 202 `{ok, state:"disconnecting"}`; 200 `{ok, state}` if already disconnecting or disconnected | – |
+| POST | `/api/v1/disconnect` | none | 202 `{ok, state:"disconnecting"}`; 200 `{ok, state}` if already disconnecting or disconnected | â€“ |
 | POST | `/api/v1/check-now` | optional `{"domains": ["example.org"]}` | 202 `{ok:true, checking:true}` (also when a check already runs) | 400, 404 `unknown_domain` |
-| POST | `/api/v1/shutdown` | none | 200 `{ok:true}`, then the app shuts down | – |
+| POST | `/api/v1/shutdown` | none | 200 `{ok:true}`, then the app shuts down | â€“ |
 
 **State** (`GET /state`, and the `state` event payload):
 
@@ -374,10 +374,10 @@ All under `/api/v1/`. Bodies are JSON with the 64 KiB limit above; no response c
 
 | Method | Path | Request | Success | Errors |
 |---|---|---|---|---|
-| GET | `/servers` | – | 200 `[Server]`, oldest first, `[]` when none | 401 403 405 503 |
+| GET | `/servers` | â€“ | 200 `[Server]`, oldest first, `[]` when none | 401 403 405 503 |
 | POST | `/servers` | `{ "input": string, "name"?: string }` (`input` = link or raw JSON; `name` 1-60 printable characters, default from the link fragment or `Server N`) | 201 Server, not activated | 400 `bad_request`, 413 `too_large`, 422 `invalid_input`, 422 `unsupported_protocol`, 409 `duplicate`, 409 `limit_reached` |
 | POST | `/servers/{id}/activate` | none | 200 `{ok:true, active:id, reloaded:false}` while disconnected or when already active; 202 `{ok:true, active:id, reloaded:true}` while connected (the reload runs, progress arrives as `state` events) | 404 `not_found`, 409 `busy` (connecting or disconnecting), 422 `invalid_input` (the dry run of the full config fails now) |
-| DELETE | `/servers/{id}` | – | 200 `{ok:true}` | 404 `not_found`, 409 `busy` (the active server while connected, or any server while connecting or disconnecting) |
+| DELETE | `/servers/{id}` | â€“ | 200 `{ok:true}` | 404 `not_found`, 409 `busy` (the active server while connected, or any server while connecting or disconnecting) |
 | POST | `/servers/test` | `{ "id": string }` or `{ "input": string }` (exactly one) | 200 `{ "ok": bool, "protocol": string, "code": string }`; `code` is `""`, `invalid_input` or `unsupported_protocol` | 400, 404, 413 |
 
 - `test` is **offline** in v1: parse plus the same dry run, no connection to the server (decision 20; no `latencyMs`). `protocol` is filled whenever it is known, also with `ok:false`.
@@ -427,7 +427,7 @@ A **rule** is a domain plus an action. The domain covers its subdomains, like a 
 
 ## Desync presets (2026-11-01, stage 2 of 3)
 
-Status: **implemented** (Go side; the Settings page is stage 3). Same transport, auth, limits, error format and Host check as above. The logic is not in this module: the catalogue, the choice, the search and the file are `internal/pc` (contract: `internal/pc/API.md`, "Desync presets: automatic selection"), `internal/pc/autodesync` and `internal/pc/desync`. The `engine` interface grew `Desync`, `DesyncPresets`, `SetDesync` and `StartDesyncSearch`. Persistence: `Paths.Data/desync.json`, owner-only, atomic.
+Status: **implemented** (Go side and the Settings page "Picky sites" tab). Same transport, auth, limits, error format and Host check as above. The logic is not in this module: the catalogue, the choice, the search and the file are `internal/pc` (contract: `internal/pc/API.md`, "Desync presets: automatic selection"), `internal/pc/autodesync` and `internal/pc/desync`. The `engine` interface grew `Desync`, `DesyncPresets`, `SetDesync` and `StartDesyncSearch`. Persistence: `Paths.Data/desync.json`, owner-only, atomic.
 
 | Method | Path | Request | Success | Errors |
 |---|---|---|---|---|

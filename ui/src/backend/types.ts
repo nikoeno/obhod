@@ -62,7 +62,29 @@ export interface RouteInfo {
   history: Change[];
   /** True for a Blocked-path site while there is no detour server: it is served directly. Absent from an older engine. */
   degraded?: boolean;
+  /**
+   * Added 2026-11-01: only while `desync.preset` is `auto`, for sites the checker routes to desync. `pending`: no search has
+   * shown yet that a preset reaches it; `verified`; `failed`: no preset reaches it (its route is then `tunnel`). Absent otherwise.
+   */
+  desync?: DesyncSiteState;
 }
+
+export type DesyncSiteState = 'pending' | 'verified' | 'failed';
+
+/** `GET /desync`. `preset` is the catalogue id in use (`custom` in custom mode). Catalogue ids and counts only. */
+export type DesyncMode = 'preset' | 'auto' | 'custom';
+export interface DesyncTry { preset: string; fixed: number; total: number }
+export type DesyncOutcome = 'chosen' | 'none' | 'inconclusive' | 'error';
+export interface DesyncSearch { at: string; tried: DesyncTry[]; chosen: string; outcome: DesyncOutcome | string }
+export interface Desync { mode: DesyncMode; preset: string; searching: boolean; lastSearch: DesyncSearch | null }
+export interface DesyncPreset { id: string; name: string; description: string }
+export interface DesyncStarted { ok: boolean; searching: boolean }
+
+/** The `desync` event: one shape per phase. `done.outcome` may also be `canceled`. */
+export type DesyncEvent =
+  | { phase: 'searching'; total: number }
+  | { phase: 'trying'; index: number; total: number; preset: string }
+  | { phase: 'done'; outcome: string; chosen: string; fixed: number; of: number };
 
 export interface Version { splitter: string; singBox: string; desync: string; api: string }
 export type LogName = 'splitter' | 'sing-box' | 'desync';
@@ -105,6 +127,7 @@ export type EngineEvent =
   | { kind: 'routes'; data: { changes: Change[] } }
   | { kind: 'check'; data: CheckEvent }
   | { kind: 'traffic'; data: Traffic }
+  | { kind: 'desync'; data: DesyncEvent }
   | { kind: 'shutdown'; data: Record<string, never> }
   | { kind: 'stream-open'; data: Record<string, never> }
   | { kind: 'stream-lost'; data: { code?: string } };
@@ -166,6 +189,13 @@ export interface Backend {
   setSite(domain: string, action: SiteAction): Promise<SiteRule>;
   /** Removes a rule (back to automatic). Rejects with `not_found` when there is none. */
   deleteSite(domain: string): Promise<Ack>;
+  getDesync(): Promise<Desync>;
+  /** The catalogue in display order. */
+  getDesyncPresets(): Promise<DesyncPreset[]>;
+  /** `preset` is `auto` or a catalogue id. Rejects with `invalid_input` or `program_missing`. */
+  setDesync(preset: string): Promise<Desync>;
+  /** Starts a search now. Rejects with `busy`, `not_auto` or `no_domains`. */
+  startDesyncSearch(): Promise<DesyncStarted>;
   /** Subscribes to engine events; resolves to an unsubscribe function. */
   onEvent(handler: (event: EngineEvent) => void): Promise<() => void>;
   dev?: DevControls;

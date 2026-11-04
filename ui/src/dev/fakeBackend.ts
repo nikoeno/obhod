@@ -8,7 +8,7 @@
 
 import {
   BackendError,
-  type Ack, type Activated, type Backend, type Change, type ConnState, type DevControls, type DevFlag, type EngineErrorBody,
+  type Ack, type Activated, type Backend, type Change, type ConnState, type Desync, type DesyncPreset, type DesyncSearch, type DesyncSiteState, type DesyncStarted, type DevControls, type DevFlag, type EngineErrorBody,
   type EngineEvent, type Problem, type EngineState, type LogName, type Logs, type ProcessInfo, type Route, type RouteInfo, type Scenario, type Server,
   type ServerTest, type SiteAction, type SiteRule, type Snapshot, type TestRequest, type TunnelState, type Version,
 } from '../backend/types';
@@ -20,6 +20,19 @@ export interface FakeOptions {
   traffic?: boolean;
   scenario?: Scenario;
 }
+
+/** The catalogue ids and names of the engine (internal/pc/desync/presets.go); the descriptions here are placeholders. */
+const FAKE_PRESETS: DesyncPreset[] = [
+  ['alt2-multisplit', 'ALT2 (multisplit)'], ['alt3-hostfakesplit', 'ALT3 (host fake split)'], ['alt-fakedsplit', 'ALT (fake and fake split)'],
+  ['general-multisplit', 'General (multisplit)'], ['alt4-fake-multisplit', 'ALT4 (fake and multisplit)'], ['alt5-multidisorder', 'ALT5 (disorder)'],
+  ['alt6-multisplit-681', 'ALT6 (multisplit, long decoy)'], ['alt7-multisplit-sniext', 'ALT7 (multisplit at SNI)'], ['alt8-fake-badseq', 'ALT8 (fake, shifted sequence)'],
+  ['alt9-hostfakesplit-ozon', 'ALT9 (host fake split, ozon.ru)'], ['alt10-fake-ts', 'ALT10 (fake, stale timestamp)'], ['alt11-fake-multisplit', 'ALT11 (fake and multisplit)'],
+  ['alt12-fake-multisplit-google', 'ALT12 (fake and multisplit, Google variant)'], ['exp-fake-multisplit', 'EXP (experimental)'], ['faketls-auto', 'Fake TLS auto (disorder)'],
+  ['faketls-auto-alt-fakedsplit', 'Fake TLS auto ALT (fake split)'], ['faketls-auto-alt2-multisplit', 'Fake TLS auto ALT2 (multisplit)'],
+  ['faketls-auto-alt3-multisplit-ts', 'Fake TLS auto ALT3 (multisplit, timestamp)'], ['simple-fake', 'Simple fake'], ['simple-fake-alt', 'Simple fake ALT (shifted sequence)'],
+  ['simple-fake-alt2', 'Simple fake ALT2 (stale timestamp)'],
+].map(([id, name]) => ({ id: id!, name: name!, description: `Engine description of ${name}.` }));
+const DEFAULT_PRESET = 'alt2-multisplit';
 
 const ZERO_TIME = '0001-01-01T00:00:00Z';
 /** A sample of the Details box for the dev-only "engine unreachable" scenario. */
@@ -135,6 +148,10 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
   let runningTunnel: TunnelState = 'ready';
   let servers: Server[] = [];
   let sites: SiteRule[] = [];
+  let desync: Desync = { mode: 'preset', preset: DEFAULT_PRESET, searching: false, lastSearch: null };
+  /** Per-site `desync` states, kept while the mode is `auto`; a missing entry is `pending`. */
+  const siteStates = new Map<string, DesyncSiteState>();
+  let searchRun = 0;
   /** What a ruled row was before the rule (null: the rule added the row). Restored when the rule is deleted. */
   const before = new Map<string, Pick<RouteInfo, 'route' | 'source' | 'since'> | null>();
   let recent: Change[] = [];
@@ -289,6 +306,33 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     return { state, error, checking, snapshot: snapshot(), networks };
   }
 
+  const desyncSites = (): RouteInfo[] => routes.filter((r) => r.route === 'desync');
+
+  /** A search that tries the first three presets and keeps the third. Cancelled by any new choice (`searchRun`). */
+  function runSearch(): void {
+    const run = ++searchRun;
+    const total = 6;
+    const names = FAKE_PRESETS.slice(0, 3);
+    const sitesNow = desyncSites().length;
+    desync = { ...desync, searching: true };
+    emit({ kind: 'desync', data: { phase: 'searching', total } });
+    const tried: DesyncSearch['tried'] = [];
+    names.forEach((p, i) => {
+      later(() => {
+        if (run !== searchRun) return;
+        emit({ kind: 'desync', data: { phase: 'trying', index: i + 1, total, preset: p.id } });
+        tried.push({ preset: p.id, fixed: i === names.length - 1 ? sitesNow : 0, total: sitesNow });
+      }, 800 * (i + 1));
+    });
+    later(() => {
+      if (run !== searchRun) return;
+      const chosen = names[names.length - 1]!.id;
+      desync = { ...desync, searching: false, preset: chosen, lastSearch: { at: new Date().toISOString(), tried, chosen, outcome: 'chosen' } };
+      for (const r of desyncSites()) siteStates.set(r.domain, 'verified');
+      emit({ kind: 'desync', data: { phase: 'done', outcome: 'chosen', chosen, fixed: sitesNow, of: sitesNow } });
+    }, 800 * (names.length + 1));
+  }
+
   function emitState(): void {
     emit({ kind: 'state', data: stateBody() });
   }
@@ -404,7 +448,12 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
     async getRoutes() {
       live();
       const none = tunnelNow() === 'none';
-      return routes.map((r) => ({ ...r, degraded: none && r.route === 'tunnel' }));
+      const auto = desync.mode === 'auto';
+      return routes.map((r) => {
+        const row: RouteInfo = { ...r, degraded: none && r.route === 'tunnel' };
+        if (auto && (r.route === 'desync' || siteStates.get(r.domain) === 'failed')) row.desync = siteStates.get(r.domain) ?? 'pending';
+        return row;
+      });
     },
     async getProcesses(): Promise<ProcessInfo[]> {
       live();
@@ -435,6 +484,8 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
         state = 'connected';
         emitState();
         startTraffic();
+        // Searches start by themselves (never inside connect) in automatic mode when a desync site waits.
+        if (desync.mode === 'auto' && !desync.searching && desyncSites().some((r) => (siteStates.get(r.domain) ?? 'pending') === 'pending')) later(runSearch, 500);
         if (scenario === 'crash') {
           later(() => {
             if (state === 'connected') fail({ error: 'The connection stopped unexpectedly.', code: 'crashed' });
@@ -622,6 +673,36 @@ export function createFakeBackend(opts: FakeOptions = {}): Backend {
         }
       }
       return { ok: true };
+    },
+    async getDesync(): Promise<Desync> {
+      live();
+      return structuredClone(desync);
+    },
+    async getDesyncPresets(): Promise<DesyncPreset[]> {
+      live();
+      return FAKE_PRESETS.map((p) => ({ ...p }));
+    },
+    async setDesync(preset: string): Promise<Desync> {
+      live();
+      if (!preset) throw new BackendError('bad_request', 'preset must be auto or the id of a desync preset.');
+      if (preset !== 'auto' && !FAKE_PRESETS.some((p) => p.id === preset)) throw new BackendError('invalid_input', 'That is not a desync preset. Use auto or an id from the preset list.');
+      searchRun++; // a choice stops a running search
+      if (preset === 'auto') {
+        desync = { ...desync, mode: 'auto', searching: false };
+        if (state === 'connected' && desyncSites().length) runSearch();
+      } else {
+        desync = { ...desync, mode: 'preset', preset, searching: false };
+        siteStates.clear();
+      }
+      return structuredClone(desync);
+    },
+    async startDesyncSearch(): Promise<DesyncStarted> {
+      live();
+      if (desync.searching || state !== 'connected') throw new BackendError('busy', 'A search is already running, or the app is not connected.');
+      if (desync.mode !== 'auto') throw new BackendError('not_auto', 'The desync preset is not automatic. Choose auto first.');
+      if (!desyncSites().length) throw new BackendError('no_domains', 'No site is routed to desync, so there is nothing to search for.');
+      runSearch();
+      return { ok: true, searching: true };
     },
     async onEvent(handler) {
       handlers.add(handler);

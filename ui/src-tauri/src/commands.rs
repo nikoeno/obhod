@@ -10,7 +10,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::client::{Ack, Activated, Api, Logs, Server, ServerTest, SiteRule, TestRequest, Version};
+use crate::client::{Ack, Activated, Api, Desync, DesyncPreset, DesyncStarted, Logs,Server, ServerTest, SiteRule, TestRequest, Version};
 use crate::engine::Manager;
 use crate::error::ApiError;
 use crate::sse::{EngineEvent, EventSink};
@@ -151,4 +151,26 @@ pub async fn site_set(state: State<'_, AppState>, domain: String, action: String
 #[tauri::command]
 pub async fn site_delete(state: State<'_, AppState>, domain: String) -> Result<Ack, ApiError> {
     with_api(&state, |a| async move { a.delete_site(&domain).await }).await
+}
+
+#[tauri::command]
+pub async fn desync_get(state: State<'_, AppState>) -> Result<Desync, ApiError> {
+    with_api(&state, |a| async move { a.desync().await }).await
+}
+
+#[tauri::command]
+pub async fn desync_presets(state: State<'_, AppState>) -> Result<Vec<DesyncPreset>, ApiError> {
+    with_api(&state, |a| async move { a.desync_presets().await }).await
+}
+
+/// Chooses the desync preset: `auto`, `custom` or a catalogue id.
+#[tauri::command]
+pub async fn desync_set(state: State<'_, AppState>, preset: String) -> Result<Desync, ApiError> {
+    with_api(&state, |a| async move { a.set_desync(&preset).await }).await
+}
+
+/// Starts a preset search now (automatic mode, connected).
+#[tauri::command]
+pub async fn desync_search(state: State<'_, AppState>) -> Result<DesyncStarted, ApiError> {
+    with_api(&state, |a| async move { a.start_desync_search().await }).await
 }

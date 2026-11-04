@@ -41,6 +41,10 @@ describe('the mocked invoke layer', () => {
     await backend.listSites();
     await backend.setSite('example.com', 'block');
     await backend.deleteSite('example.com');
+    await backend.getDesync();
+    await backend.getDesyncPresets();
+    await backend.setDesync('auto');
+    await backend.startDesyncSearch();
     expect(calls).toEqual([
       { cmd: 'ui_version' },
       { cmd: 'engine_start' },
@@ -65,6 +69,10 @@ describe('the mocked invoke layer', () => {
       { cmd: 'sites_list' },
       { cmd: 'site_set', args: { domain: 'example.com', action: 'block' } },
       { cmd: 'site_delete', args: { domain: 'example.com' } },
+      { cmd: 'desync_get' },
+      { cmd: 'desync_presets' },
+      { cmd: 'desync_set', args: { preset: 'auto' } },
+      { cmd: 'desync_search' },
     ]);
   });
 

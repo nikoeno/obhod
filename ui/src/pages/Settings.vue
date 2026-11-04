@@ -5,6 +5,8 @@ import { computed, onMounted, reactive, ref, useId, watch } from 'vue';
 import { actions, pages } from '../../design/copy';
 import type { Server, Version } from '../backend/types';
 import Tabs from '../components/Tabs.vue';
+import { choices, desyncErrorText, panelState, selectedId, siteCountText, siteCounts, statusView, outcomeText, triedLines } from '../lib/desyncModel';
+import { problemViews } from '../lib/problems';
 import { loadSetting, saveSetting } from '../lib/settings';
 import { hostPort, MAX_SERVERS, protocolName, serverErrorText, serverNote, serversLocked, serverText } from '../lib/serverText';
 import { toast } from '../lib/toast';
@@ -17,7 +19,7 @@ const S = store.S;
 const t = pages.settings;
 const uid = useId();
 
-const TAB_IDS = ['general', 'detour', 'advanced', 'about'] as const;
+const TAB_IDS = ['general', 'detour', 'desync', 'advanced', 'about'] as const;
 type TabId = (typeof TAB_IDS)[number];
 const tabs = TAB_IDS.map((id) => ({ id, label: t.tabs[id] }));
 const tab = ref<TabId>((TAB_IDS as readonly string[]).includes(route.params.tab ?? '') ? (route.params.tab as TabId) : 'general');
@@ -70,6 +72,62 @@ function focusId(id: string): void {
   setTimeout(() => document.getElementById(id)?.focus(), 0);
 }
 const onAdded = (s: Server): void => focusId(`${uid}-use-${s.id}`);
+
+// ---------- picky sites (desync) ----------
+const td = t.desync;
+const dPanel = computed(() => panelState({ engineDown: S.engineDown, loaded: S.desyncLoaded, failed: S.desyncFailed }));
+const dChoices = computed(() => choices(S.desyncPresets, S.desync));
+const dSelected = computed(() => selectedId(S.desync));
+const dAuto = computed(() => S.desync?.mode === 'auto');
+const dCounts = computed(() => siteCounts(S.routes));
+const dStatus = computed(() =>
+  statusView({ info: S.desync, presets: S.desyncPresets, progress: S.desyncProgress, engineDown: S.engineDown, state: S.state, network: S.snapshot?.Network ?? '', routed: dCounts.value.routed }),
+);
+const dSites = computed(() => siteCountText(dCounts.value));
+const dLast = computed(() => S.desync?.lastSearch ?? null);
+const dOutcome = computed(() => (dLast.value ? outcomeText(dLast.value, S.desyncPresets) : ''));
+const dTried = computed(() => (dLast.value ? triedLines(dLast.value, S.desyncPresets) : []));
+const dProblems = computed(() => problemViews(S.problems).filter((p) => p.code === 'desync_failed'));
+const dBusy = ref<string | null>(null);
+const dSearchStarting = ref(false);
+const dMessage = ref('');
+
+async function chooseDesync(id: string): Promise<void> {
+  if (id === dSelected.value || dBusy.value) return;
+  dBusy.value = id;
+  dMessage.value = '';
+  try {
+    await store.setDesync(id);
+    toast(S.state === 'connected' ? td.applied : td.appliedOff);
+  } catch (e) {
+    dMessage.value = desyncErrorText(e as { code?: string });
+    toast(dMessage.value);
+  } finally {
+    dBusy.value = null;
+  }
+}
+
+async function searchAgain(): Promise<void> {
+  dSearchStarting.value = true;
+  dMessage.value = '';
+  try {
+    await store.searchDesync();
+    toast(td.searchStarted);
+  } catch (e) {
+    dMessage.value = desyncErrorText(e as { code?: string });
+    toast(dMessage.value);
+  } finally {
+    dSearchStarting.value = false;
+  }
+}
+
+watch(
+  tab,
+  (v) => {
+    if (v === 'desync' && !S.engineDown && !S.desyncLoaded) void store.refreshDesync();
+  },
+  { immediate: true },
+);
 
 // ---------- advanced ----------
 const advanced = reactive({
@@ -227,6 +285,57 @@ watch(
           </div>
           <span class="later">{{ actions.later }}</span>
         </div>
+      </template>
+
+      <!-- Picky sites (desync) -->
+      <template v-else-if="tab === 'desync'">
+        <div class="row setting">
+          <div class="grow">
+            <strong>{{ t.tabs.desync }}</strong>
+            <p class="muted small">{{ td.lead }}</p>
+          </div>
+        </div>
+
+        <div v-for="p in dProblems" :key="p.key" class="banner problem" role="alert">
+          <span class="banner-icon" aria-hidden="true">!</span>
+          <span class="grow">{{ p.text }}</span>
+        </div>
+
+        <p v-if="dPanel === 'engine-down'" class="empty">{{ td.engineDown }}</p>
+        <p v-else-if="dPanel === 'loading'" class="empty">{{ td.loading }}</p>
+        <div v-else-if="dPanel === 'failed'" class="empty">
+          <p>{{ td.loadFailed }}</p>
+          <button class="btn small" type="button" @click="store.refreshDesync()">{{ td.retry }}</button>
+        </div>
+        <template v-else>
+          <div class="presets" role="radiogroup" :aria-label="td.groupLabel" :aria-busy="!!dBusy">
+            <label v-for="c in dChoices" :key="c.id" :class="['preset', { on: dSelected === c.id }]">
+              <input type="radio" name="desync-preset" :value="c.id" :checked="dSelected === c.id" :disabled="!!dBusy || c.kind === 'custom'" @change="chooseDesync(c.id)" />
+              <span class="preset-text">
+                <span class="preset-name">{{ c.name }}<span v-if="dBusy === c.id" class="muted small"> · {{ td.saving }}</span></span>
+                <span class="muted small">{{ c.description }}</span>
+              </span>
+            </label>
+          </div>
+          <p v-if="dMessage" class="small" role="alert">{{ dMessage }}</p>
+
+          <section v-if="dAuto" class="auto-status" aria-labelledby="auto-h" aria-live="polite">
+            <h2 id="auto-h" class="h3">{{ td.status.title }}</h2>
+            <p>{{ dStatus.line }}</p>
+            <progress v-if="dStatus.fraction !== null" class="bar" max="1" :value="dStatus.fraction" :aria-label="dStatus.line"></progress>
+            <p v-if="dSites" class="muted small">{{ dSites }}</p>
+            <template v-if="dLast && !dStatus.fraction">
+              <p v-if="dOutcome" class="small">{{ dOutcome }}</p>
+              <ul v-if="dTried.length" class="plainlist small muted" :aria-label="td.status.lastTitle">
+                <li v-for="x in dTried" :key="x.key" :class="{ chosen: x.chosen }">{{ x.text }}</li>
+              </ul>
+            </template>
+            <div class="row gap wrap">
+              <button class="btn" type="button" :disabled="!dStatus.canSearch || dSearchStarting" :aria-describedby="`${uid}-why`" @click="searchAgain">{{ td.searchAgain }}</button>
+              <span :id="`${uid}-why`" class="muted small">{{ dStatus.why }}</span>
+            </div>
+          </section>
+        </template>
       </template>
 
       <!-- Advanced -->

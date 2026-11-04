@@ -58,6 +58,10 @@ pub fn run() {
             commands::sites_list,
             commands::site_set,
             commands::site_delete,
+            commands::desync_get,
+            commands::desync_presets,
+            commands::desync_set,
+            commands::desync_search,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the app");
