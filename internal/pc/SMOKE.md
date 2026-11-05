@@ -2,7 +2,7 @@
 
 Manual checks that need a real machine and administrator rights. The automated tests cover the logic with fakes; none of them starts a real TUN or intercepts real packets. Run these before a release and after changing `procman`, `singbox`, `desync` or the lifecycle in `app.go`.
 
-Automated part (no admin rights): `go test -tags integration ./internal/pc/...` generates configs and runs the pinned `sing-box check` on them (`internal/pc/singbox`, `internal/pc` `TestCheckConfigWithPinnedSingBox`). `winws2.exe` asks for elevation even for `--help`, so the renderer test only checks that every emitted flag name occurs in the binary.
+Automated part (no admin rights): `go test -tags integration ./internal/pc/... ./api/desktop/` generates configs and runs the pinned `sing-box check` on them (`internal/pc/singbox`, `api/desktop` `TestCheckConfigWithPinnedSingBox`). `winws2.exe` asks for elevation even for `--help`, so the renderer test only checks that every emitted flag name occurs in the binary.
 
 ## Prepare
 

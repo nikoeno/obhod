@@ -22,17 +22,22 @@ Knows the command line of nfqws2 (zapret2) and the nftables rules that feed it. 
 ```go
 package nfqws
 
+type Blob struct{ Name, Path string } // --blob=Name:@Path: a payload loaded into the Lua variable Name
+
 type Input struct {
     Binary       string   // path to nfqws2
     LuaDir       string   // default: <dir of Binary>/lua
     LuaInit      []string // default zapret-lib.lua, zapret-antidpi.lua
-    Strategy     []string // zapret2 profile args, passed through verbatim
+    Strategy     []string // zapret2 profile args, passed through verbatim (one profile); not with Profiles
     Hostlist     []string
     Uplink       string // oifname
     QueueNum     uint16 // default 200
     ExcludeIPs   []netip.Prefix
     ExcludePorts [][2]uint16
-    Ports        []uint16
+    Ports        []uint16 // TCP destination ports to queue; default 80, 443
+    Profiles     [][]string // multi-profile form (added 2026-11-01): the match and Lua options of each profile
+    UDPPorts     []uint16   // UDP destination ports to queue (an extra nft rule); only with Profiles
+    Blobs        []Blob     // --blob options; only with Profiles
     Mark         uint32 // mark nfqws2 puts on its own packets (avoid loops); default 0x40000000 (zapret2 default)
 }
 
@@ -55,6 +60,7 @@ func Render(in Input) (Output, error)
 - Routing exemption: the last `NFTSetup` command is `ip rule add fwmark 0x40000000/0x40000000 lookup main priority 8999` and the last `NFTDown` command is the same with `ip rule del`. The mark is the value of `Mark` (the one used in the nft rules and in `--fwmark`, a single value). Reason: with sing-box `auto_route`, the rule `not from all iif lo lookup 2022` (priority 9003) sends every locally generated packet that is not bound to a device into the TUN, and nfqws2 injects its pieces through raw sockets that carry only the mark; priority 8999 is evaluated before sing-box's 9000+ rules and sends marked packets through the main table (the default route via the uplink). IPv4 only: the plan has no IPv6 switch, and `ip -6` policy routing may be absent on the host. The `ip rule` line is not idempotent (a second `add` creates a duplicate); the app prints it only when the listing lacks it. The two lists therefore hold `ip` commands as well as `nft` ones (the field names are kept).
 - Outgoing only. Queuing replies (a `prerouting` chain plus `sysctl net.netfilter.nf_conntrack_tcp_be_liberal=1`, a global system setting) is out of scope until a strategy needs it.
 - Args: `--qnum=QueueNum`, one `--lua-init=@<LuaDir>/<file>` per `LuaInit`, `--hostlist=hostlist.txt` (relative to the engine's working directory), `--uid=0:0`, then `Strategy`.
+- With `Profiles` (decided 2026-11-01, presets) the args are `--qnum=`, `--fwmark=` (non-default mark), the `--lua-init` options, `--uid=0:0`, one `--blob=<Name>:@<Path>` per `Blobs` entry, then every profile as `--hostlist=hostlist.txt` followed by its arguments, with `--new` between profiles (the hostlist is added by the renderer to each profile, so none can select outside it). `UDPPorts` adds one more queue rule next to the TCP one in the same chain, after the same early `return`s: `oifname "<uplink>" udp dport { <ports> } meta mark and <mark> == 0 ct original packets 1-12 queue num <qnum> bypass` (the zapret2 README form). Validation as in `winws/API.md` (`ErrInvalid`). The `Strategy` form is unchanged byte for byte.
 - Flags must be verified against the **pinned zapret2 version** (1.0.5.2).
 
 - Rules are emitted as `nft '<statement>'` lines so that braces and semicolons survive a shell. Excluded destination addresses and source ports are early `return` rules in the postrouting chain, before the queue rule: a match such as `ip daddr != X` inside the queue rule would exclude every IPv6 packet from queuing.

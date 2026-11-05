@@ -1,0 +1,23 @@
+{
+  "protocol": "tuic",
+  "host": "example.com",
+  "port": 443,
+  "engine": "singbox",
+  "name": "TUIC",
+  "outbound": {
+    "congestion_control": "bbr",
+    "password": "fake-password-1",
+    "server": "example.com",
+    "server_port": 443,
+    "tls": {
+      "alpn": [
+        "h3"
+      ],
+      "enabled": true,
+      "server_name": "example.com"
+    },
+    "type": "tuic",
+    "udp_relay_mode": "native",
+    "uuid": "00000000-0000-4000-8000-000000000000"
+  }
+}

@@ -1,66 +1,81 @@
-# Obhod desktop UI: clickable MVP with a mock engine
+# Obhod desktop UI (Tauri v2 + Vue 3 + TypeScript)
 
-This folder is a clickable prototype of the desktop UI planned in ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`) and specified in `docs/UI.md`. It is not the Tauri app yet. All buttons talk to a local **mock** server that pretends to be the engine (`splitter`) and its planned M12 control API (`internal/pc/PLAN.md`). Nothing real happens: no routing, no elevation, no network changes.
+The production desktop UI of ADR 0003 (`docs/adr/0003-desktop-ui-and-packaging.md`), specified in `docs/UI.md`. Rules for working here: `ui/AGENTS.md`. Engine contract: `api/desktop/API.md`.
 
-## Run
+Status (Stage B, 2026-11-01): all five pages are built: **Home**, **Sites**, **Activity**, **Settings** (including the Detour server flow) and **Help**, plus the app shell, the connect state machine and error mapping. The old clickable prototype (`ui/web/`, `ui/mock/`) is deleted; it lives in git history only. `ui/design/` stays as the visual and copy contract.
 
-```sh
-node ui/mock/server.js
+Per-site rules (2026-11-01): Sites has **Add a site** and, in the side panel, **Always use…** and **Remove my rule** (Rust commands `sites_list`, `site_set`, `site_delete`; engine endpoints `/sites`). The fake backend validates and limits like the engine (500 rules); in `npm run dev` a rule can be added, changed and removed on every scenario.
+
+No detour server (2026-11-01): **Start works without one** (the engine connects in its Everyday + Picky only mode). The snapshot's additive `Tunnel` (`ready` | `none`) and `degraded` on each route are passed through unchanged by the Rust side (`api_state`, `api_routes` and the `state` event are validated JSON, not structs). Home shows "Running without a detour server..." with **Add server** (no more Skip for now), the Blocked card gets a muted caveat, and Sites flags `degraded` rows with **No detour**. After a server is made active while On, the store reads `GET /state` every 2 s (up to 45 s) until `Tunnel` is `ready`. In `npm run dev` the scenario **No detour server** shows all of it (add and activate a server from Settings and the flags clear); **Detour server cannot be used** keeps the `tunnel_missing` failure.
+
+Problems (2026-11-01): the engine's additive `snapshot.Problems` (`[{Code, Message, Detail}]`, decision 44) is passed through unchanged by the Rust side. The store keeps `S.problems` (cleaned: `Detail` capped at 4000 characters, control characters removed, duplicates merged; hidden 1.5 s after the engine stops reporting a problem). Home shows one non-dismissable warning banner per problem (known codes in the app's own words: "The quiet fix could not start. Picky sites may not open."; unknown codes show `Message` only) with a collapsed **Details** box, **Copy** and **Restart engine**; the status line says "On, with a problem" and Activity → Warnings lists them first. In `npm run dev` the Ctrl+Shift+D switches "Problem: the quiet fix could not start" and "Problem: the detour program stopped" raise them while On; **Restart engine** clears them. Pure logic: `src/lib/problems.ts`.
+
+## How it fits together
+
+```
+Vue 3 frontend (webview)  --invoke / events-->  Rust (src-tauri)  --HTTP + bearer token, loopback-->  splitter run --ui
+   no token, no fetch                            only API client, owns the child                        (elevated, started by Rust)
 ```
 
-Then open the URL it prints (default `http://127.0.0.1:8787/`). Set `PORT` to use another port (`PORT=9000 node ui/mock/server.js`; in PowerShell `$env:PORT=9000; node ui/mock/server.js`). Needs Node 18 or newer. There are no npm dependencies, no build step and no external URLs or fonts.
+- The Rust side creates a random token, writes it to a user-only file in the per-user app data folder, starts `splitter run --ui --token-file P --addr-file P2 --error-file P3 --parent-pid <ui pid>` (Windows: `ShellExecute runas`; Linux: `pkexec`), reads the address from the ready line or the address file, and talks to the control API. It forwards the event stream to the webview as the Tauri event `engine-event` (`{ kind, data }`). The token never reaches JavaScript.
+- The frontend calls typed commands through `src/backend/` (`Backend` interface). `src/backend/tauri.ts` is the production implementation; `src/dev/fakeBackend.ts` is an in-memory stand-in for `npm run dev` in a plain browser and for tests (there is no separate mock server any more).
+- The engine is started when the app opens (one UAC / pkexec prompt, then it runs for the session and exits with the UI). If permission is refused, Home shows "Permission was not given." with **Try again**.
 
-Press **Ctrl+Shift+D** in the UI for the mock controls (scenario, warnings, proxy/blocked-by-you sites, "still learning", change network, reset data).
+## Prerequisites
+
+- Node 22 or newer (developed with 24) and npm.
+- Rust stable with the MSVC toolchain on Windows (Visual Studio Build Tools, "Desktop development with C++") and WebView2 (preinstalled on Windows 11). On Linux the Tauri system packages (webkit2gtk 4.1, etc.): see https://v2.tauri.app/start/prerequisites/.
+
+## Commands (run in `ui/`)
+
+| Command | What |
+|---|---|
+| `npm ci` | reproducible install from `package-lock.json` |
+| `npm run dev` | Vite dev server on http://127.0.0.1:1420 in a plain browser, with the **fake backend** (no Rust, no engine, no other server to start). `Ctrl+Shift+D` opens the scenario panel: scenarios (normal, no-server (Start works without a server), tunnel-missing (Start fails), permission-denied, needs-setup, crash, engine-unreachable) and data switches (warnings, engine problems (quiet fix failed, detour program stopped), proxy and blocked-by-you sites, still learning, first run with the network not identified yet, a failing server switch). Every page reads from it, so each one can be checked in every scenario |
+| `npm run typecheck` | `vue-tsc --noEmit` |
+| `npm test` | vitest (store, error mapping, view models of Home / Sites / Activity / Help, per-site rules (input cleaning, errors, dialog model), server dialog logic, mocked invoke layer, source rules, icon sync) |
+| `npm run build` | typecheck + production web build into `dist/` (no fake backend inside) |
+| `npm run tauri:dev` | the real app in dev mode (starts the engine elevated; see below) |
+| `npm run tauri:build` | release build and bundle (not part of Stage A checks) |
+| `cargo test --locked` (in `src-tauri/`) | Rust tests: fake HTTP server, fake `Launcher`, SSE, error mapping, secrets |
+| `cargo clippy --all-targets` (in `src-tauri/`) | lints |
+
+`cargo build`/`tauri dev` embed `dist/`, so on a fresh clone run `npm ci && npm run build` once before building in `src-tauri/` (`tauri dev` and `tauri build` do it for you through `beforeDevCommand`/`beforeBuildCommand`).
+
+Running the real app needs a `splitter` binary: in a debug build the UI looks for `splitter` next to its own executable, or at the path in the `OBHOD_SPLITTER` environment variable (debug builds only; a release build never reads the environment). The engine needs administrator rights, so the real launch triggers a UAC prompt. Agents never run it; the human does:
+
+```powershell
+# PowerShell, from the repo root: build the engine once, then start the UI (it will ask for permission)
+go build -o bin\splitter.exe .\cmd\splitter
+$env:OBHOD_SPLITTER = "$PWD\bin\splitter.exe"; npm --prefix ui run tauri:dev
+```
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `mock/server.js` | `node:http` server, binds 127.0.0.1 only. Serves `web/` and the mock `/api/v1` |
-| `web/index.html`, `web/style.css` | shell, navigation, colour tokens (light and dark) |
-| `web/api.js` | the only module that calls the engine (fetch + EventSource); to be swapped for Tauri `invoke` calls |
-| `web/store.js` | state mirrored from the engine, live events, actions |
-| `web/shell.js`, `web/dom.js`, `web/words.js` | navigation, dialogs, log viewer; DOM helpers (textContent only); user words and error sentences |
-| `web/app.js` | router, keyboard shortcuts, dev panel |
-| `web/pages/*.js` | Home, Sites, Activity, Settings, Help |
-| `design/` | Design kit for the production app: tokens (JSON, CSS, TS), user copy, icons, component spec (`design/README.md`) |
+| `design/` | **Kept.** Design kit: tokens (JSON, CSS, TS), user copy, icons, component spec. Imported by the app (`tokens.css`, `copy.ts`, `tokens.ts`) |
+| `src/main.ts`, `src/App.vue` | bootstrap, shell (nav, status line, dialogs, keyboard shortcuts) |
+| `src/backend/` | `types.ts` (the command/event contract), `tauri.ts` (invoke + listen), `index.ts` (picks the backend; fake only in dev) |
+| `src/store.ts` | state mirrored from the engine, actions, event handling |
+| `src/lib/` | pure logic: formatting, error mapping, server rules and text, view models (`homeModel`, `sitesModel`, `activityModel`, `helpModel`), Add-server model, icons data |
+| `src/pages/` | `Home.vue`, `Sites.vue`, `Activity.vue`, `Settings.vue`, `Help.vue` |
+| `src/components/` | dialogs (including `SiteRuleDialog`: Add a site / Always use…), tabs, toasts, icon, log viewer, process list |
+| `src/dev/` | **dev/test only**: `fakeBackend.ts`, `DevPanel.vue` (tree-shaken from production builds) |
+| `src/styles/app.css` | component CSS on top of `design/tokens.css` |
+| `src-tauri/src/` | `token`, `http` (loopback HTTP client), `sse` (parser + reconnecting reader), `client` (typed endpoints, error mapping), `launcher` (`Launcher` trait, ShellExecute/pkexec), `engine` (start, ready, stop), `commands` (Tauri commands: engine, `api_*`, `servers_*`, `sites_list` / `site_set` / `site_delete`) |
+| `src-tauri/capabilities/default.json` | the webview may only listen to events |
 
-## What the mock simulates
+## First-run regression tests
 
-Endpoints (JSON, errors as `{ "error", "code" }`):
+A first run once showed an empty Sites page (and "still learning") although the engine listed the sites. These tests keep the UI side honest (`npm test`):
 
-| Endpoint | Behaviour |
+| Test | Guards |
 |---|---|
-| `GET /api/v1/state` | `{ state, error, checking, snapshot, networks }`; `snapshot` has the status `Snapshot` shape with Go field names (`State`, `Network`, `LastCheck`, `NextCheck`, `Routes`, `Traffic`, `Savings`, `Processes`, `Warnings`, `Recent`, `Version`) |
-| `GET /api/v1/routes` | about 40 fake domains: `{ domain, route, since, trafficToday, lastCheck, history }` |
-| `GET /api/v1/processes` | splitter, sing-box, desync with state and restarts |
-| `GET /api/v1/logs?name=splitter\|sing-box\|desync` | fake log lines `{ name, lines }` |
-| `GET /api/v1/version` | UI and engine versions |
-| `POST /api/v1/connect` | disconnected → connecting → (1.5 s) → connected |
-| `POST /api/v1/disconnect` | connected → disconnecting → (0.8 s) → disconnected |
-| `POST /api/v1/check-now` | optional `{ "domains": [...] }`; after 2 s moves 1–2 random sites (or some of the given ones) to another route and adds them to `Recent` |
-| `POST /api/v1/shutdown` | acknowledges only |
-| `GET /api/v1/events` | Server-Sent Events: `state` (on every transition, full state payload), `routes` (`{ changes: [...] }`), `check` (`{ running }`), `traffic` every 2 s while connected (`uploadTotal`, `downloadTotal`, `connections`, per-route `delta`) |
+| `src/lib/sitesModel.test.ts` "listView, first-run regression" | `listView` never returns `learning` when there are sites (any combination of `engineDown`, `learning`, `loaded`, `total`, `shown`, `query`), and returns it only for an empty table. |
+| `src/store.test.ts` "first run (network not identified yet)" | With the fake's **First run: network not identified, sites listed** switch (`unidentified`, network "unknown network", rows present) the store has rows, the Sites list view is `list`, and identifying the network later keeps them. |
+| `src/lib/errors.test.ts` | `program_missing` (a helper program is missing next to the app) shows its own sentence and **Show engine log**, never the generic "Could not connect". |
 
-Mock-only controls:
+## Not done yet
 
-- `GET|POST /api/v1/mock/scenario` with `{ scenario }` (or `?scenario=`), also `warnings`, `extras`, `learning` (booleans), `network: "next"`, `reset: true`. `?scenario=<name>` on any request switches too.
-- `POST /api/v1/mock/restart-engine` stands in for the UI restarting the `splitter` sidecar (also returns to `normal`).
-
-Scenarios:
-
-| Scenario | What happens |
-|---|---|
-| `normal` | everything works |
-| `permission-denied` | Start fails back to disconnected with `permission_denied` ("Permission was not given.") |
-| `needs-setup` | Start fails with `needs_setup` and the Linux nft commands; the UI shows them in a dialog with **Copy** (example commands, never run) |
-| `crash` | connects, then drops to disconnected after a few seconds with `crashed` |
-| `no-engine` | every API call answers 503 `engine_unreachable`; the UI shows "The engine is not running." and **Restart engine** |
-
-No real IP addresses appear anywhere; the network is a label such as "Home Wi-Fi (Example ISP)". Settings are stored in the browser's `localStorage` only.
-
-## Notes
-
-- `ui/` is outside the Go module rules in `AGENTS.md`: it holds no Go code, and `arch_test.go` only walks `internal/` and `lab/`.
-- In the real app the web frontend calls Tauri commands only; the Rust side is the only API client and holds the token (ADR 0003). The mock has no token.
-- Not built here: tray menu, first-run screens, OS notifications, real file import, diagnostics export.
+Tray icon and menu; OS notifications; diagnostics export (no UI designed, `docs/UI.md` section 12); Open logs folder; first-run Welcome and Permission screens; moving General/Advanced settings to the Rust side; sidecar packaging (`bundle.externalBin`, ADR 0003).

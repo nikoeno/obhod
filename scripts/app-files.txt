@@ -1,0 +1,16 @@
+# Files that must sit next to splitter.exe in the Windows app folder (dist/app).
+# One path per line, relative to third_party/bin/windows-amd64 and to dist/app; '#' starts a comment.
+# This is the single list used by scripts/build-app.ps1 (make app). It must equal the windows-amd64
+# "to" names in third_party/manifest.yaml: scripts/fetch/appfiles_test.go enforces that, so a pinned
+# file cannot be forgotten at packaging time (the app then fails at Start with "A required program is missing").
+sing-box.exe
+libcronet.dll
+LICENSE.sing-box
+winws2.exe
+WinDivert.dll
+WinDivert64.sys
+cygwin1.dll
+lua/zapret-lib.lua
+lua/zapret-antidpi.lua
+lua/zapret-auto.lua
+LICENSE.zapret2

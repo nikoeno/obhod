@@ -1,0 +1,21 @@
+{
+  "protocol": "vless",
+  "host": "2001:db8::7",
+  "port": 443,
+  "engine": "singbox",
+  "name": "VLESS gRPC IPv6",
+  "outbound": {
+    "server": "2001:db8::7",
+    "server_port": 443,
+    "tls": {
+      "enabled": true,
+      "server_name": "example.com"
+    },
+    "transport": {
+      "service_name": "svc",
+      "type": "grpc"
+    },
+    "type": "vless",
+    "uuid": "00000000-0000-4000-8000-000000000000"
+  }
+}

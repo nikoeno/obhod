@@ -1,0 +1,4 @@
+{
+  "error": "preset must be auto or the id of a desync preset.",
+  "code": "bad_request"
+}

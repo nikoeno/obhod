@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/nikoejento/obhod/internal/lib/checker"
@@ -13,6 +14,9 @@ import (
 	"github.com/nikoejento/obhod/internal/pc/monitor"
 	"github.com/nikoejento/obhod/internal/pc/status"
 )
+
+// binary is the name of the splitter executable, used for the version string.
+const binary = "splitter"
 
 // routeByTag maps a Clash connection to a route by its outbound tag, the last
 // element of its chain. The tags direct, desync, tunnel and proxy are the route
@@ -66,6 +70,9 @@ func (w *watchedClash) down() bool {
 // failureSink feeds a monitor failure to the checker's failure threshold.
 func (a *App) failureSink() func(monitor.Failure) {
 	return func(f monitor.Failure) {
+		if f.Route == route.Desync {
+			a.noteLiveFailure(f.Domain, f.At)
+		}
 		a.d.checker.ReportFailure(checker.Failure{Domain: f.Domain, Route: f.Route, Verdict: f.Verdict, At: f.At})
 	}
 }
@@ -86,10 +93,12 @@ func (s *statusSource) Snapshot() status.Snapshot {
 		Routes:    make(map[route.Route]int, len(st.Counts)),
 		Traffic:   map[route.Route]int64{},
 		Warnings:  append([]string(nil), st.Warnings...),
+		Tunnel:    a.tunnelStatus(),
 	}
 	for r, n := range st.Counts {
 		snap.Routes[r] = n
 	}
+	a.adjustCounts(snap.Routes) // sites no desync preset reaches count as tunnel
 	for _, p := range a.d.procs.Status() {
 		snap.Processes = append(snap.Processes, status.Process{Name: p.Name, State: string(p.State), Restarts: p.Restarts})
 	}
@@ -97,6 +106,7 @@ func (s *statusSource) Snapshot() status.Snapshot {
 	a.mu.Lock()
 	mon, watch := a.monitor, a.clashWatch
 	snap.Recent = append([]status.Change(nil), a.recent...)
+	snap.Problems = append([]status.Problem{}, a.problems...)
 	a.mu.Unlock()
 	if watch != nil && watch.down() {
 		snap.Warnings = append(snap.Warnings, "sing-box's Clash API is not answering: traffic stats and failure detection are paused")
@@ -117,14 +127,16 @@ func (s *statusSource) Snapshot() status.Snapshot {
 	return snap
 }
 
-// networkLabel names the network for the status page: the AS name, else AS<number>, else a placeholder.
-// It never contains the public IP.
+// networkLabel names the network for the status page: the AS name, else AS<number>, "This connection" for a
+// local ID (adapter and gateway only, no ISP known), else a placeholder. It never contains an address.
 func networkLabel(n checker.Network) string {
 	switch {
 	case n.ASName != "":
 		return n.ASName
 	case n.ASN != 0:
 		return "AS" + strconv.FormatUint(uint64(n.ASN), 10)
+	case strings.HasPrefix(n.ID, "local:"):
+		return "This connection"
 	}
 	return "unknown network"
 }

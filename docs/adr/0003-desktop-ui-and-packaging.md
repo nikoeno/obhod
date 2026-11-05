@@ -4,7 +4,7 @@ Status: accepted (2026-10-01); open points listed at the end
 
 ## Context
 
-The desktop product needs a GUI, and the user wants "one app": one download, one icon. The engine (`splitter`, `internal/pc`) needs admin/root for the TUN adapter and for WinDivert/nfqws2. sing-box and winws2/nfqws2 (zapret2) are external programs (`docs/HUMAN-third-party.md`), so the product is several processes whatever the UI technology is.
+The desktop product needs a GUI, and the user wants "one app": one download, one icon. The engine (`splitter`, app module `api/desktop`, composing `internal/pc`) needs admin/root for the TUN adapter and for WinDivert/nfqws2. sing-box and winws2/nfqws2 (zapret2) are external programs (`docs/HUMAN-third-party.md`), so the product is several processes whatever the UI technology is.
 
 ## Decision
 
@@ -13,9 +13,9 @@ The desktop product needs a GUI, and the user wants "one app": one download, one
 3. **Privileges.** The UI always runs as a normal user and never elevated.
    - v1: the UI starts `splitter` elevated on Connect (Windows: UAC prompt via `ShellExecute` `runas`; Linux: `pkexec`).
    - Later: the installer (already elevated) registers `splitter` as a Windows service / systemd unit, and the UI only connects to it. No prompt per connect, and the connection survives closing the window.
-4. **Control API.** `splitter` serves a versioned JSON API (`/api/v1/...`) on loopback only, plus an event stream for live updates. Every request needs a token. The **Rust side of the Tauri app is the only client**: the web frontend calls Tauri commands, never the API directly. So there is no CORS, and the token never reaches JavaScript.
+4. **Control API.** `splitter` serves, from the gateway `api/desktop` (ADR 0004), a versioned JSON API (`/api/v1/...`) on loopback only, plus an event stream for live updates. Every request needs a token. The **Rust side of the Tauri app is the only client**: the web frontend calls Tauri commands, never the API directly. So there is no CORS, and the token never reaches JavaScript.
 5. **Lifecycle.** `splitter` has an explicit *disconnected* state: the checker keeps running and the status is served, but sing-box and the desync engine are stopped. The UI's Connect/Disconnect switches between the states. `splitter run` from a terminal connects immediately (as before). When started by the UI, `splitter` starts disconnected and exits when the UI process exits (v1).
-6. The existing Go rules (`AGENTS.md`, `arch_test.go`) do not apply to the UI code. The UI lives in its own tree with its own rules (see Open).
+6. The existing Go rules (`AGENTS.md`, `arch_test.go`) do not apply to the UI code. The UI lives in `ui/` of this repo (resolved 2026-11-01, see Open) with its own rules in `ui/AGENTS.md`.
 
 ## Alternatives considered
 
@@ -28,13 +28,13 @@ The desktop product needs a GUI, and the user wants "one app": one download, one
 
 ## Consequences
 
-- `internal/pc` gains a control API (extending or replacing the read-only status page) and connect/disconnect states. Planned in `internal/pc/PLAN.md` (M10, M12; G15–G18).
+- `internal/pc` gains connect/disconnect states (M10, done); the control API (extending or replacing the read-only status page) lives in `api/desktop` (ADR 0004, milestone 3 = `internal/pc/PLAN.md` M12; G15–G18).
 - The binary lookup default (D1 in `docs/HUMAN-third-party.md`) becomes "next to `splitter`", which matches the Tauri install folder.
 - Packaging (stage C in `docs/HUMAN-third-party.md`) is done by the Tauri bundler. Sidecars must be named with the Rust target triple (e.g. `splitter-x86_64-pc-windows-msvc.exe`), so the release build renames them.
 - Licenses of the bundled binaries must be handled before the first public release (D4 in `docs/HUMAN-third-party.md`).
 
 ## Open
 
-- Where the UI code lives: `ui/` in this repo (needs an `AGENTS.md` note that `ui/` is outside the Go module rules) or a separate repo.
-- Whether the control API is a new child (`internal/pc/control`) or an extension of `internal/pc/status` (an API change: ask first).
+- ~~Where the UI code lives.~~ **Resolved (2026-11-01, human):** `ui/` in this repo. It is a Tauri v2 app (Rust in `ui/src-tauri/`, Vue 3 + TypeScript + Vite in `ui/src/`), outside the Go module rules (`AGENTS.md` has a note; `ui/AGENTS.md` holds the UI rules). The design kit stays in `ui/design/` and is imported by the app. The old clickable prototype (`ui/web`, `ui/mock`) was deleted in Stage B (2026-11-01) after the port; it stays in git history only. The dev stand-in without an engine is `ui/src/dev/fakeBackend.ts`.
+- Resolved by ADR 0004: the control API is a gateway module, `api/desktop`, not a child of `internal/pc`. Whether it replaces `internal/pc/status` is decided with milestone 3.
 - When to switch from "UAC prompt per connect" to a service.

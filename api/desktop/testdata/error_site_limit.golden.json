@@ -1,0 +1,4 @@
+{
+  "error": "The list of site rules is full. Remove a rule first.",
+  "code": "limit_reached"
+}

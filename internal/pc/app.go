@@ -16,25 +16,29 @@ import (
 
 	"github.com/nikoejento/obhod/internal/lib/paths"
 	"github.com/nikoejento/obhod/internal/lib/route"
+	"github.com/nikoejento/obhod/internal/pc/autodesync"
 	"github.com/nikoejento/obhod/internal/pc/desync"
 	"github.com/nikoejento/obhod/internal/pc/lib/clashapi"
 	"github.com/nikoejento/obhod/internal/pc/procman"
+	"github.com/nikoejento/obhod/internal/pc/servers"
 	"github.com/nikoejento/obhod/internal/pc/singbox"
+	"github.com/nikoejento/obhod/internal/pc/sites"
 	"github.com/nikoejento/obhod/internal/pc/status"
 )
 
 // Exit codes of the splitter command.
 const (
-	exitOK      = 0
-	exitConfig  = 1 // config or usage error
-	exitManual  = 2 // needs admin rights or a manual setup step (the message says which)
-	exitRuntime = 3 // runtime failure
+	ExitOK      = 0
+	ExitConfig  = 1 // config or usage error
+	ExitManual  = 2 // needs admin rights or a manual setup step (the message says which)
+	ExitRuntime = 3 // runtime failure
 )
 
 // exitError carries the exit code of a failed Run.
 type exitError struct {
-	code int
-	err  error
+	code     int
+	err      error
+	commands []string // the manual setup commands of an exit-2 error (Classify: needs_setup)
 }
 
 func (e *exitError) Error() string { return e.err.Error() }
@@ -44,18 +48,21 @@ func fail(code int, format string, a ...any) error {
 	return &exitError{code: code, err: fmt.Errorf(format, a...)}
 }
 
-// exitCode maps the error of Run to the process exit code.
-func exitCode(err error) int {
+// Fail returns an error that ExitCode maps to code.
+func Fail(code int, format string, a ...any) error { return fail(code, format, a...) }
+
+// ExitCode maps the error of Run to the process exit code.
+func ExitCode(err error) int {
 	var ee *exitError
 	switch {
 	case err == nil:
-		return exitOK
+		return ExitOK
 	case errors.As(err, &ee):
 		return ee.code
 	case errors.Is(err, procman.ErrNeedsAdmin):
-		return exitManual
+		return ExitManual
 	}
-	return exitRuntime
+	return ExitRuntime
 }
 
 // State is the connection state of the App.
@@ -91,8 +98,11 @@ type Option func(*App)
 // WithLogger sets the logger; the default discards everything.
 func WithLogger(l *slog.Logger) Option { return func(a *App) { a.log = l } }
 
-func withUI(ui bool) Option        { return func(a *App) { a.ui = ui } }
-func withParentPID(pid int) Option { return func(a *App) { a.parentPID = pid } }
+// WithUI makes the app start disconnected and wait for Connect.
+func WithUI(ui bool) Option { return func(a *App) { a.ui = ui } }
+
+// WithParentPID makes Run end cleanly when the process pid exits.
+func WithParentPID(pid int) Option { return func(a *App) { a.parentPID = pid } }
 func withDeps(d *deps) Option      { return func(a *App) { a.d = d } }
 func withTunnelOutbounds(ob singbox.Outbounds) Option {
 	return func(a *App) { a.outbounds, a.haveOutbounds = ob, true }
@@ -111,15 +121,40 @@ type App struct {
 	outbounds     singbox.Outbounds
 	haveOutbounds bool
 
+	// Server management (servers.go). store is opened on first use; pending
+	// is the activation whose reload has not finished; kick asks the reload
+	// loop to run at once.
+	storeMu sync.Mutex
+	store   *servers.Store
+	pending *activation
+	kick    chan struct{}
+
+	// Per-site rules (sites.go). siteMu serializes rule changes with the call to the checker.
+	siteMu sync.Mutex
+	sites  *sites.Store
+
 	// op serializes connect, disconnect and reload.
 	op opLock
+
+	// Desync choice and search (desyncauto.go). dsMu is a leaf lock: nothing else is locked while it is held.
+	auto          autodesync.Config // Config.DesyncAuto with the defaults filled
+	dsMu          sync.Mutex
+	dsStore       *autodesync.Store // opened on first use
+	dsStoreFailed bool
+	dsSearch      *searchRun
+	dsTrial       *trialState
+	dsLast        *DesyncSearch
+	dsCool        time.Time // automatic searches wait until then
+	dsFails       map[string][]time.Time
 
 	mu         sync.Mutex
 	runCtx     context.Context
 	cancelRun  context.CancelFunc
 	state      State
 	secret     string
-	table      route.Table
+	table      route.Table // what the app runs on: raw with the desync results applied (effectiveTable)
+	raw        route.Table // the checker's table as published
+	dsStates   map[string]string
 	recent     []status.Change
 	uplinkName string
 	engine     engineState
@@ -129,11 +164,32 @@ type App struct {
 	monDone    chan struct{}
 	dialClash  clashapi.Client
 	binaries   binaries
+	sbTunnel   bool // the running sing-box config has a tunnel outbound (false: degraded, tunnel routes go direct)
+	problems   []status.Problem // things that do not work while connected (problems.go); cleared on Connect and Disconnect
 
 	release     func()        // releases the single-instance lock
 	onFatal     func(error)   // ends Run with an error
 	tunnelAddrs []netip.Addr  // resolved addresses of a host-name tunnel server
 	clashWatch  *watchedClash // the monitor's Clash API client; reports outages
+
+	// Control API state (control.go, events.go). mu guards the fields up to chkMu.
+	ready       chan struct{}
+	readyOnce   sync.Once
+	events      hub
+	ring        *LogRing
+	lastErr     *OpError
+	since       map[string]time.Time       // when each table entry got its current route
+	history     map[string][]status.Change // route changes of this run per domain, at most maxHistory
+	changeCount int                        // route changes seen so far (the "changed" of a check)
+	networks    []NetworkInfo
+	netID       string
+
+	chkMu      sync.Mutex // guards the check watcher fields below
+	chkActive  bool       // a check start was announced and its end was not
+	chkSeen    bool       // the checker showed Running since then
+	chkGrace   int
+	chkDomains []string
+	chkStart   int // changeCount when the check started
 }
 
 // opLock is a mutex whose Lock gives up when ctx ends, so a shutdown is not
@@ -187,13 +243,14 @@ type binaries struct{ singBox, desync string }
 // New builds the App and every child. Nothing is started and no file is
 // changed. With real dependencies it reads the check lists and the decision store.
 func New(cfg Config, p paths.Paths, opts ...Option) (*App, error) {
-	a := &App{cfg: cfg, p: p, log: slog.New(slog.NewTextHandler(io.Discard, nil)), state: StateDisconnected, op: newOpLock()}
+	a := &App{cfg: cfg, p: p, log: slog.New(slog.NewTextHandler(io.Discard, nil)), state: StateDisconnected, op: newOpLock(), ready: make(chan struct{}), kick: make(chan struct{}, 1)}
 	for _, o := range opts {
 		o(a)
 	}
 	if err := a.cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	a.auto = a.cfg.DesyncAuto.WithDefaults()
 	if a.d == nil {
 		d, err := realDeps(a.cfg, p)
 		if err != nil {
@@ -216,6 +273,7 @@ func (a *App) setState(s State) {
 	a.state = s
 	a.mu.Unlock()
 	a.log.Info("state", "state", string(s))
+	a.publish(Event{Kind: EventState})
 }
 
 // Run starts the app and blocks until ctx is done or a fatal error happens,
@@ -232,7 +290,7 @@ func (a *App) Run(ctx context.Context) (err error) {
 	}
 	secret, err := a.d.newSecret()
 	if err != nil {
-		return fail(exitRuntime, "generate clash api secret: %v", err)
+		return fail(ExitRuntime, "generate clash api secret: %v", err)
 	}
 	a.mu.Lock()
 	a.runCtx, a.cancelRun, a.secret = ctx, cancel, secret
@@ -243,7 +301,9 @@ func (a *App) Run(ctx context.Context) (err error) {
 		a.mu.Unlock()
 	}()
 
-	// 2. The checker, and its first table (the store or the defaults).
+	// 2. The checker, and its first table (the store or the defaults). The user's per-site rules go in
+	// first, so the first table already has them.
+	a.loadSiteRules()
 	var wg sync.WaitGroup
 	fatal := make(chan error, 4)
 	run := func(name string, f func(context.Context) error) task {
@@ -304,10 +364,12 @@ func (a *App) Run(ctx context.Context) (err error) {
 		}
 	}
 	if serr != nil {
-		err = fail(exitConfig, "status: %v", serr)
+		err = fail(ExitConfig, "status: %v", serr)
 		shutdown()
 		return err
 	}
+
+	a.markReady()
 
 	// Connected state: steps 3-5 of the startup order.
 	if !a.ui {
@@ -330,11 +392,13 @@ func (a *App) Run(ctx context.Context) (err error) {
 	}
 	wg.Add(1)
 	go func() { defer wg.Done(); a.logProcEvents(reloadCtx) }()
+	wg.Add(1)
+	go func() { defer wg.Done(); a.watch(reloadCtx) }()
 
 	select {
 	case <-ctx.Done():
 	case ferr := <-fatal:
-		err = fail(exitRuntime, "%v", ferr)
+		err = fail(ExitRuntime, "%v", ferr)
 	}
 	stopReload()
 	shutdown()
@@ -346,27 +410,32 @@ func (a *App) preflight(ctx context.Context) error {
 	if err != nil {
 		a.log.Warn("cannot determine admin rights", "err", err)
 	} else if !ok {
-		return fail(exitManual, "administrator rights are required (TUN and packet interception): %s", elevationHint)
+		return fail(ExitManual, "administrator rights are required (TUN and packet interception): %s", elevationHint)
 	}
 	if err := a.d.ensure(a.p); err != nil {
 		if !errors.Is(err, paths.ErrACL) {
-			return fail(exitRuntime, "create directories: %v", err)
+			return fail(ExitRuntime, "create directories: %v", err)
 		}
 		a.log.Warn("could not restrict directory permissions", "err", err)
 	}
 	if a.d.lockInstance != nil {
 		release, err := a.d.lockInstance(a.p.Run)
 		if err != nil {
-			return fail(exitRuntime, "%v", err)
+			return fail(ExitRuntime, "%v", err)
 		}
 		a.mu.Lock()
 		a.release = release
 		a.mu.Unlock()
 	}
 	if !a.haveOutbounds {
-		ob, err := loadSecrets(a.cfg.Secrets, a.p)
+		ob, err := loadSecretsFor(a.cfg.Secrets, a.p, a.ui)
 		if err != nil {
-			return fail(exitConfig, "%v", err)
+			return fail(ExitConfig, "%v", err)
+		}
+		if len(ob.Tunnel) == 0 {
+			// UI mode, first run: no server in use yet. Start disconnected;
+			// Connect then runs without a tunnel (degraded mode) until a server is activated.
+			a.log.Info("no tunnel server file yet; starting disconnected")
 		}
 		a.outbounds, a.haveOutbounds = ob, true
 	}
@@ -386,18 +455,52 @@ func (a *App) releaseInstance() {
 	}
 }
 
-func (a *App) setTable(t route.Table) {
+// setTable takes a table as the checker published it, applies the desync results to it and makes it the table
+// the app runs on.
+func (a *App) setTable(raw route.Table) {
+	t, states := a.effectiveTable(raw)
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.raw, a.dsStates = raw, states
+	var changes []status.Change
+	now := a.d.clk.Now()
+	if a.since == nil {
+		a.since, a.history = map[string]time.Time{}, map[string][]status.Change{}
+	}
 	if a.table.NetworkID != "" || len(a.table.Entries) > 0 {
 		for _, c := range route.Diff(a.table, t) {
-			a.recent = append(a.recent, status.Change{Domain: c.Domain, From: c.From, To: c.To, At: a.d.clk.Now()})
+			ch := status.Change{Domain: c.Domain, From: c.From, To: c.To, At: now}
+			changes = append(changes, ch)
+			a.recent = append(a.recent, ch)
+			switch {
+			case c.To == "": // removed
+				delete(a.since, c.Domain)
+				delete(a.history, c.Domain)
+			case c.From == "": // added
+				a.since[c.Domain] = now
+			default:
+				a.since[c.Domain] = now
+				h := append(a.history[c.Domain], ch)
+				if len(h) > maxHistory {
+					h = append([]status.Change(nil), h[len(h)-maxHistory:]...)
+				}
+				a.history[c.Domain] = h
+			}
 		}
 		if n := len(a.recent); n > recentChanges {
 			a.recent = append([]status.Change(nil), a.recent[n-recentChanges:]...)
 		}
+		a.changeCount += len(changes)
+	}
+	for _, e := range t.Entries {
+		if _, ok := a.since[e.Domain]; !ok {
+			a.since[e.Domain] = now
+		}
 	}
 	a.table = t
+	a.mu.Unlock()
+	if len(changes) > 0 {
+		a.publish(Event{Kind: EventRoutes, Changes: changes})
+	}
 }
 
 func (a *App) currentTable() route.Table {
@@ -443,20 +546,29 @@ func (a *App) Connect(ctx context.Context) error {
 	if a.State() == StateConnected {
 		return nil
 	}
+	a.setLastError(nil, false) // the connecting event that follows carries the cleared error
+	a.clearProblems()
 	a.setState(StateConnecting)
 	if err := a.connectLocked(ctx); err != nil {
+		if ctx.Err() == nil { // a connect cancelled by the caller or by shutdown is no error
+			oe := Classify(err)
+			a.log.Warn("connect failed", "code", oe.Code, "err", err) // the error text (it may name a missing program) stays in the log
+			a.setLastError(oe, false)                                 // the disconnected event below carries it
+		}
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*stepTimeout)
 		defer cancel()
 		_ = a.disconnectLocked(stopCtx)
 		return err
 	}
 	a.setState(StateConnected)
+	_ = a.startSearch(searchAuto) // sites that already wait for a desync search; the table may be empty yet
 	return nil
 }
 
 // Disconnect stops the monitor, sing-box and the desync engine, in that
 // order, and keeps the checker running.
 func (a *App) Disconnect(ctx context.Context) error {
+	a.stopSearch(true) // a search takes the op lock between its steps: end it first
 	if err := a.op.Lock(ctx); err != nil {
 		return err
 	}
@@ -472,6 +584,10 @@ func (a *App) disconnectLocked(ctx context.Context) error {
 	}
 	a.setState(StateDisconnecting)
 	var errs []error
+	a.stopSearch(false) // the search sees its context end and the state change; it cannot be waited for here
+	a.dsMu.Lock()
+	a.dsTrial = nil
+	a.dsMu.Unlock()
 	a.stopMonitor()
 	for _, name := range []string{nameSingBox, string(desync.WinWS), string(desync.NFQWS)} {
 		if err := a.d.procs.Stop(ctx, name); err != nil && !errors.Is(err, procman.ErrNotFound) {
@@ -480,6 +596,8 @@ func (a *App) disconnectLocked(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	a.engine = engineState{}
+	a.pending = nil // a server activated while connected stays; the next connect uses it
+	a.problems = nil
 	a.mu.Unlock()
 	a.setState(StateDisconnected)
 	return errors.Join(errs...)
@@ -491,7 +609,7 @@ func (a *App) connectLocked(ctx context.Context) error {
 	table := a.currentTable()
 	bins, err := a.resolveBinaries()
 	if err != nil {
-		return fail(exitConfig, "%v", err)
+		return fail(ExitConfig, "%w", err)
 	}
 	a.resolveTunnel(ctx)
 	r, err := a.render(ctx, bins, table, true)
@@ -508,7 +626,7 @@ func (a *App) connectLocked(ctx context.Context) error {
 			return err
 		}
 		if err := a.writePlanFiles(r.plan); err != nil {
-			return fail(exitRuntime, "write desync files: %v", err)
+			return fail(ExitRuntime, "write desync files: %v", err)
 		}
 		sctx, cancel := context.WithTimeout(ctx, stepTimeout)
 		err := a.d.procs.Start(sctx, a.engineSpec(r.plan))
@@ -518,12 +636,13 @@ func (a *App) connectLocked(ctx context.Context) error {
 			return a.startError("desync engine", err)
 		}
 		a.rememberEngine(r.plan)
+		a.clearProblem(status.ProblemDesyncFailed)
 	}
 
 	// sing-box.
 	cfgFile := filepath.Join(a.p.Run, singBoxFileName)
 	if err := a.stageSingBox(ctx, bins, r.singBox, cfgFile); err != nil {
-		return fail(exitConfig, "%v", err)
+		return fail(ExitConfig, "%v", err)
 	}
 	sctx, cancel := context.WithTimeout(ctx, startTimeout)
 	err = a.d.procs.Start(sctx, a.singBoxSpec(bins, cfgFile))
@@ -534,7 +653,11 @@ func (a *App) connectLocked(ctx context.Context) error {
 	}
 	a.mu.Lock()
 	a.lastSBRun = a.d.clk.Now()
+	a.sbTunnel = r.tunnel
 	a.mu.Unlock()
+	if !r.tunnel {
+		a.log.Warn("no detour server in use: connected without a tunnel; routes that need it go direct")
+	}
 
 	a.startMonitor()
 	return nil
@@ -542,9 +665,9 @@ func (a *App) connectLocked(ctx context.Context) error {
 
 func (a *App) startError(what string, err error) error {
 	if errors.Is(err, procman.ErrNeedsAdmin) {
-		return fail(exitManual, "%s: %v: %s", what, err, elevationHint)
+		return fail(ExitManual, "%s: %w: %s", what, err, elevationHint)
 	}
-	return fail(exitRuntime, "start %s: %v", what, err)
+	return fail(ExitRuntime, "start %s: %v", what, err)
 }
 
 // checkNFT, on Linux, refuses to start when the nftables table that feeds the
@@ -559,7 +682,7 @@ func (a *App) checkNFT(ctx context.Context, plan desync.Plan) error {
 	}
 	listing, ok, err := a.d.nftTable(ctx)
 	if err != nil {
-		return fail(exitManual, "cannot check the nftables table (is nft installed?): %v", err)
+		return fail(ExitManual, "cannot check the nftables table (is nft installed?): %v", err)
 	}
 	var nftCmds, ipCmds []string // all nft commands; the ip rule commands still missing
 	hasIP := false
@@ -587,7 +710,7 @@ func (a *App) checkNFT(ctx context.Context, plan desync.Plan) error {
 		switch {
 		case errors.Is(err, errors.ErrUnsupported):
 		case err != nil:
-			return fail(exitManual, "cannot check the ip rules (is ip installed?): %v", err)
+			return fail(ExitManual, "cannot check the ip rules (is ip installed?): %v", err)
 		default:
 			if ipCmds = ipRuleMissing(rules, plan.Setup); len(ipCmds) > 0 {
 				problems = append(problems, "the ip rule that sends the engine's marked packets through the main table is missing "+
@@ -612,7 +735,8 @@ func (a *App) checkNFT(ctx context.Context, plan desync.Plan) error {
 	for _, c := range plan.Teardown {
 		b.WriteString("  " + c + "\n")
 	}
-	return &exitError{code: exitManual, err: errors.New(strings.TrimRight(b.String(), "\n"))}
+	return &exitError{code: ExitManual, err: errors.New(strings.TrimRight(b.String(), "\n")),
+		commands: append(append([]string(nil), nftCmds...), ipCmds...)}
 }
 
 func (a *App) startMonitor() {
@@ -710,6 +834,7 @@ func (a *App) logProcEvents(ctx context.Context) {
 					a.engine = engineState{}
 				}
 				a.mu.Unlock()
+				a.procFailed(e.Name, e.Err) // the user must know; the connection stays up
 			}
 		}
 	}
@@ -754,11 +879,14 @@ func (a *App) singBoxFailed(ctx context.Context, cause error) {
 // reconnect, so Run ends with an error. a.op must be held.
 func (a *App) singBoxLostLocked(ctx context.Context, cause error) {
 	a.log.Error("sing-box is not running; disconnecting", "err", cause)
+	a.setLastError(crashedError(), false) // the disconnected event below carries it
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*stepTimeout)
 	defer cancel()
 	if err := a.disconnectLocked(dctx); err != nil {
 		a.log.Error("disconnect after the sing-box failure", "err", err)
 	}
+	// Set after the disconnect, which clears the list: the user sees why the connection ended.
+	a.setProblem(status.Problem{Code: status.ProblemTunnelEngineFailed, Message: msgTunnelEngineFailed, Detail: a.problemDetail(nameSingBox, cause)})
 	if a.ui {
 		return
 	}
@@ -794,6 +922,26 @@ func (a *App) resolveTunnel(ctx context.Context) {
 	a.mu.Unlock()
 }
 
+// tunnelStatus returns status.TunnelReady or status.TunnelNone. While connected it
+// describes the running sing-box config (a server activated during the 30 s gap
+// is not in it yet); otherwise whether a server is in use.
+func (a *App) tunnelStatus() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.tunnelStatusLocked()
+}
+
+func (a *App) tunnelStatusLocked() string {
+	have := len(a.outbounds.Tunnel) > 0
+	if a.state == StateConnected {
+		have = a.sbTunnel
+	}
+	if have {
+		return status.TunnelReady
+	}
+	return status.TunnelNone
+}
+
 // resolveBinaries finds sing-box and, when needed, the desync engine.
 func (a *App) resolveBinaries() (binaries, error) {
 	a.mu.Lock()
@@ -802,7 +950,7 @@ func (a *App) resolveBinaries() (binaries, error) {
 	if b.singBox == "" {
 		sb, err := a.d.findBinary("sing-box", a.cfg.SingBox.Binary)
 		if err != nil {
-			return binaries{}, err
+			return binaries{}, fmt.Errorf("%w: %v", errProgramMissing, err)
 		}
 		b.singBox = sb
 	}

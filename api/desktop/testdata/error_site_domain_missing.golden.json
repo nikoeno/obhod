@@ -1,0 +1,4 @@
+{
+  "error": "domain must be a site name such as example.com.",
+  "code": "bad_request"
+}

@@ -21,7 +21,7 @@ Plain data types exchanged between the checker's children.
 ```go
 package model
 
-// NetworkID is an opaque label for the current network, e.g. "asn:12389" or "gw:3f9a…".
+// NetworkID is an opaque label for the current network, e.g. "asn:12389", "gw:3f9a…" or "local:3f9a…".
 type NetworkID string
 
 func (id NetworkID) Valid() bool
@@ -52,7 +52,7 @@ func (d Decision) Clone() Decision
 
 ## Behavior / contract
 
-JSON-serializable with stable snake_case field names (`domain`, `route`, `source`, `decided_at`, `checked_at`, `expires_at`, `pending`, `last`; `pending`/`last` are omitted when empty), pinned by a golden file. `NetworkID.Valid`: prefix `asn:` or `gw:`, no whitespace, at most 128 bytes (`MaxIDLen`).
+JSON-serializable with stable snake_case field names (`domain`, `route`, `source`, `decided_at`, `checked_at`, `expires_at`, `pending`, `last`; `pending`/`last` are omitted when empty), pinned by a golden file. `NetworkID.Valid`: prefix `asn:`, `gw:` or `local:`, no whitespace, at most 128 bytes (`MaxIDLen`).
 
 ## Config
 

@@ -1,0 +1,3 @@
+desync:
+  preset: auto
+  strategy: ['--lua-desync=fake']

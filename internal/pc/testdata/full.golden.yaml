@@ -96,6 +96,7 @@ singbox:
 desync:
     engine: winws2
     binary: /opt/winws2
+    preset: custom
     strategy:
         - --filter-l7=tls
         - --lua-desync=fake
@@ -109,6 +110,18 @@ desync:
           - 50099
     ports:
         - 443
+desync_auto:
+    max_presets: 6
+    settle: 2s
+    pause:
+        - 1s
+        - 3s
+    budget: 3m0s
+    max_domains: 8
+    probe_timeout: 8s
+    concurrency: 2
+    backoff: 10m0s
+    failed_ttl: 24h0m0s
 procman:
     max_restarts: 3
     restart_window: 5m0s

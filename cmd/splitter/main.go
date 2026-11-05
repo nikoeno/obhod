@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/nikoejento/obhod/internal/pc"
+	"github.com/nikoejento/obhod/api/desktop"
 )
 
-func main() { os.Exit(pc.Main(os.Args[1:])) }
+func main() { os.Exit(desktop.Main(os.Args[1:])) }

@@ -36,5 +36,13 @@
       "To": "desync",
       "At": "2026-10-01T12:00:00Z"
     }
+  ],
+  "Tunnel": "ready",
+  "Problems": [
+    {
+      "Code": "desync_failed",
+      "Message": "The desync program could not start. Picky sites may not open.",
+      "Detail": "Exit: gave up after 5 restarts: exit status 87\nOutput:\nwinws2.exe: filter error"
+    }
   ]
 }

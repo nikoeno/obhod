@@ -26,22 +26,23 @@ func TestFilterClauses(t *testing.T) {
 	}{
 		{"interface only", 7, nil, nil, "ifIdx == 7"},
 		{"ipv4 host", 7, []netip.Prefix{pfx("203.0.113.7/32")}, nil,
-			"ifIdx == 7 and not (ip.DstAddr == 203.0.113.7)"},
+			"ifIdx == 7 and (ipv6 or ip.DstAddr != 203.0.113.7)"},
 		{"ipv4 net", 7, []netip.Prefix{pfx("10.0.0.0/8")}, nil,
-			"ifIdx == 7 and not ((ip.DstAddr >= 10.0.0.0 and ip.DstAddr <= 10.255.255.255))"},
+			"ifIdx == 7 and (ipv6 or ip.DstAddr < 10.0.0.0 or ip.DstAddr > 10.255.255.255)"},
 		{"unmasked prefix", 7, []netip.Prefix{pfx("192.168.5.9/24")}, nil,
-			"ifIdx == 7 and not ((ip.DstAddr >= 192.168.5.0 and ip.DstAddr <= 192.168.5.255))"},
+			"ifIdx == 7 and (ipv6 or ip.DstAddr < 192.168.5.0 or ip.DstAddr > 192.168.5.255)"},
 		{"ipv6 host", 7, []netip.Prefix{pfx("2001:db8::1/128")}, nil,
-			"ifIdx == 7 and not (ipv6.DstAddr == 2001:db8::1)"},
+			"ifIdx == 7 and (ip or ipv6.DstAddr != 2001:db8::1)"},
 		{"ipv6 net", 7, []netip.Prefix{pfx("2001:db8::/32")}, nil,
-			"ifIdx == 7 and not ((ipv6.DstAddr >= 2001:db8:: and ipv6.DstAddr <= 2001:db8:ffff:ffff:ffff:ffff:ffff:ffff))"},
+			"ifIdx == 7 and (ip or ipv6.DstAddr < 2001:db8:: or ipv6.DstAddr > 2001:db8:ffff:ffff:ffff:ffff:ffff:ffff)"},
 		{"mixed", 3, []netip.Prefix{pfx("2001:db8::/32"), pfx("203.0.113.0/30"), pfx("198.51.100.1/32")}, nil,
-			"ifIdx == 3 and not ((ip.DstAddr >= 203.0.113.0 and ip.DstAddr <= 203.0.113.3) or ip.DstAddr == 198.51.100.1)" +
-				" and not ((ipv6.DstAddr >= 2001:db8:: and ipv6.DstAddr <= 2001:db8:ffff:ffff:ffff:ffff:ffff:ffff))"},
+			"ifIdx == 3 and (ip or ipv6.DstAddr < 2001:db8:: or ipv6.DstAddr > 2001:db8:ffff:ffff:ffff:ffff:ffff:ffff)" +
+				" and (ipv6 or ip.DstAddr < 203.0.113.0 or ip.DstAddr > 203.0.113.3)" +
+				" and (ipv6 or ip.DstAddr != 198.51.100.1)"},
 		{"zero prefix", 3, []netip.Prefix{pfx("0.0.0.0/0")}, nil,
-			"ifIdx == 3 and not ((ip.DstAddr >= 0.0.0.0 and ip.DstAddr <= 255.255.255.255))"},
+			"ifIdx == 3 and (ipv6 or ip.DstAddr < 0.0.0.0 or ip.DstAddr > 255.255.255.255)"},
 		{"ports", 3, nil, [][2]uint16{{50000, 50099}, {8080, 8080}},
-			"ifIdx == 3 and not ((tcp.SrcPort >= 50000 and tcp.SrcPort <= 50099) or tcp.SrcPort == 8080)"},
+			"ifIdx == 3 and (not tcp or tcp.SrcPort < 50000 or tcp.SrcPort > 50099) and (not tcp or tcp.SrcPort != 8080)"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -202,5 +203,85 @@ func TestRenderErrors(t *testing.T) {
 				t.Fatalf("err = %v", err)
 			}
 		})
+	}
+}
+
+func profilesInput() Input {
+	in := baseInput()
+	in.Strategy = nil
+	in.Ports = []uint16{443, 80, 2053}
+	in.UDPPorts = []uint16{443}
+	in.Blobs = []Blob{{Name: "fake_tls_google", Path: "C:/app/fake/tls.bin"}}
+	in.Profiles = [][]string{
+		{"--filter-udp=443", "--payload=quic_initial", "--lua-desync=fake:blob=fake_default_quic"},
+		{"--filter-tcp=80,443,2053", "--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=fake_tls_google"},
+	}
+	return in
+}
+
+func TestRenderProfiles(t *testing.T) {
+	out, err := Render(profilesInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"--wf-tcp-out=80,443,2053",
+		"--wf-udp-out=443",
+		"--wf-raw-filter=" + mustFilter(t),
+		"--lua-init=@C:/app/third_party/lua/zapret-lib.lua",
+		"--lua-init=@C:/app/third_party/lua/zapret-antidpi.lua",
+		"--blob=fake_tls_google:@C:/app/fake/tls.bin",
+		"--hostlist=hostlist.txt", "--filter-udp=443", "--payload=quic_initial", "--lua-desync=fake:blob=fake_default_quic",
+		"--new",
+		"--hostlist=hostlist.txt", "--filter-tcp=80,443,2053", "--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=fake_tls_google",
+	}
+	if strings.Join(out.Args, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("args:\n%s\nwant:\n%s", strings.Join(out.Args, "\n"), strings.Join(want, "\n"))
+	}
+	// Every profile begins with the hostlist; the raw filter (uplink, exclusions) is still the only one.
+	if n := strings.Count(strings.Join(out.Args, "\n"), "--wf-raw-filter="); n != 1 {
+		t.Fatalf("%d raw filters", n)
+	}
+}
+
+func mustFilter(t *testing.T) string {
+	t.Helper()
+	in := baseInput()
+	f, err := Filter(in.IfIndex, in.ExcludeIPs, in.ExcludePorts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func TestRenderProfilesErrors(t *testing.T) {
+	cases := map[string]func(*Input){
+		"strategy and profiles": func(in *Input) { in.Strategy = []string{"--lua-desync=fake"} },
+		"empty profile":         func(in *Input) { in.Profiles = append(in.Profiles, nil) },
+		"bad blob name":         func(in *Input) { in.Blobs = []Blob{{Name: "a-b", Path: "x"}} },
+		"blob name with colon":  func(in *Input) { in.Blobs = []Blob{{Name: "a:@b", Path: "x"}} },
+		"empty blob path":       func(in *Input) { in.Blobs = []Blob{{Name: "ok", Path: ""}} },
+		"blob offset":           func(in *Input) { in.Blobs = []Blob{{Name: "ok", Path: "+5@x"}} },
+		"udp port zero":         func(in *Input) { in.UDPPorts = []uint16{0} },
+	}
+	for name, mut := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := profilesInput()
+			mut(&in)
+			if _, err := Render(in); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+	// Blobs and UDP ports without profiles would be silently ignored.
+	in := baseInput()
+	in.UDPPorts = []uint16{443}
+	if _, err := Render(in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("UDPPorts without Profiles: %v", err)
+	}
+	in = baseInput()
+	in.Blobs = []Blob{{Name: "x", Path: "y"}}
+	if _, err := Render(in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Blobs without Profiles: %v", err)
 	}
 }

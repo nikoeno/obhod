@@ -24,7 +24,7 @@ The desktop UI (ADR 0003) talks to the engine over a local HTTP API. That API mu
 - Because gateways are leaves of the import graph (only `cmd/<binary>` imports them), they cannot be wired into modules and cannot create cycles.
 - Milestones:
   1. This ADR, rule (f) and `Uses modules` in `arch_test.go`. No gateway yet.
-  2. Move the app role out of `internal/pc`: `api/desktop` becomes the `splitter` app and wires `pc`.
-  3. Control API (`internal/pc/PLAN.md` M12).
-  4. Server-management endpoints.
-- Open: ADR 0003 point 4 and its Open list still place the control API in `splitter`/`pc`; milestone 2 updates them.
+  2. Move the app role out of `internal/pc`: `api/desktop` becomes the `splitter` app and wires `pc`. Done (2026-10-30): `api/desktop` owns `Main` and the command line; `internal/pc` is `Kind: child`, used by `api/desktop`, and exports what the CLI needs.
+  3. Control API (`internal/pc/PLAN.md` M12). Done (2026-10-31, commit f793081): contract and decisions in `api/desktop/API.md`.
+  4. Server-management endpoints. Done (2026-10-31): the new child `internal/pc/servers` (parsers, validation, storage, activation; contract in its `API.md`), the `pc` exports (`pc.Server` alias, `AddServer`, `ActivateServer`, ...) and the endpoints `GET/POST /servers`, `POST /servers/{id}/activate`, `DELETE /servers/{id}`, `POST /servers/test` in `api/desktop` (decisions 12-23 in `api/desktop/API.md`). `internal/pc` now starts in UI mode without a tunnel file. The gateway still imports only `internal/pc` for this (the alias), so its `Uses modules` did not change.
+- ADR 0003 point 4 and its Open list now place the control API in `api/desktop` (updated with milestone 2).

@@ -48,12 +48,12 @@ func (w *Watcher) Changes() <-chan Network // emits when ID or Known changes; la
 
 ## Behavior / contract
 
-- **ID derivation:** `asn:<number>` when the public IP → ASN lookup succeeds. Otherwise `gw:<hash(gatewayMAC+SSID)>`. If `cfg.IncludeGateway` is set, `asn:<n>/gw:<hash>` (splits e.g. home vs mobile on the same ISP).
+- **ID derivation:** `asn:<number>` when the public IP → ASN lookup succeeds. Otherwise `gw:<hash(gatewayMAC+SSID)>`; with neither, `local:<hash(uplink name+gateway IP)>` (below). If `cfg.IncludeGateway` is set, `asn:<n>/gw:<hash>` (splits e.g. home vs mobile on the same ISP).
 - Re-identify on every netif event (debounced by `cfg.Debounce`, default 3 s) and every `cfg.Refresh` (default 30 min).
 - The public-IP lookup must go **direct** (not via tunnel), otherwise the ID would be the VPS's.
 - Hashes use a per-install random salt, so IDs aren't linkable across installs.
-- Identification failure (no public IP / ASN) → keep the last known ID if the uplink (interface, gateway, gateway MAC) didn't change; otherwise fall back to `gw:` when a gateway MAC or SSID is known, else `Known=false`.
-- The gateway hash needs a gateway MAC or SSID (a bare gateway IP identifies nothing); on Windows, where neither is available yet, only the ASN path works.
+- Identification failure (no public IP / ASN) → keep the last known ID if the uplink (interface, gateway, gateway MAC) didn't change; otherwise fall back to `gw:` when a gateway MAC or SSID is known, then to `local:`, else `Known=false`.
+- The `gw:` hash needs a gateway MAC or SSID. **Local fallback (2026-11-01):** when the ASN path and `gw:` both give nothing, the ID is `local:<first 16 hex of sha256(salt|local|uplink name|gateway IP)>`. It needs only the uplink's name and its default gateway IP, which `netif` gives offline on every OS (Windows has no gateway MAC or SSID yet, so there `local:` is the usual ID without echo endpoints). No outside lookup is involved. It is honest but weak: a bare gateway IP such as 192.168.1.1 is shared by countless networks, so decisions are kept per adapter + gateway + install salt, not per ISP; the salt makes the ID install-local, and it contains no address. It changes when the adapter name or the gateway IP changes. Without a valid name or gateway the network stays unknown. The IDs are never mixed: once an ASN lookup works, the ID becomes `asn:`.
 - No default echo endpoints are built in (no hardcoded servers): with `EchoEndpoints` empty and `PublicIP` nil the ASN path is off. Echo requests never use a system proxy, and errors never contain the endpoint URL. The public IP is never logged.
 - `Events` failing to start is not fatal: the watcher still refreshes every `cfg.Refresh`.
 
@@ -75,7 +75,7 @@ type Config struct {
 
 ## Testing
 
-Fake uplink/events/public-IP/resolver: ASN path, gateway fallback, debounce, "no change → no event", ID stability.
+Fake uplink/events/public-IP/resolver: ASN path, gateway fallback, local fallback (Windows-like uplink with no MAC/SSID: stable, per salt, changes with gateway or adapter, no raw address in the ID, last resort only), debounce, "no change → no event", ID stability.
 
 ## Out of scope
 

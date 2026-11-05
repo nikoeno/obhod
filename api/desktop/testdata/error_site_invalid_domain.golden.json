@@ -1,0 +1,4 @@
+{
+  "error": "That is not a plain site name. Enter only the name, for example example.com.",
+  "code": "invalid_input"
+}

@@ -75,8 +75,8 @@ func TestMissingIPRuleRefusesConnect(t *testing.T) {
 	h.nftList = nftListingEth0
 	h.ipRules = "0:\tfrom all lookup local\n9003:\tnot from all iif lo lookup 2022\n"
 	err := h.app.Run(context.Background())
-	if exitCode(err) != exitManual {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitManual {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 	msg := err.Error()
 	for _, want := range []string{"Apply these commands as root", "  " + wantIPRule, "Remove the rules later with:", "  ip rule del fwmark 0x40000000/0x40000000 lookup main priority 8999"} {
@@ -99,8 +99,8 @@ func TestMissingNFTAndIPRulePrintsBoth(t *testing.T) {
 	h.nftList = nftListingEth0
 	h.nft, h.ipRules = false, ""
 	err := h.app.Run(context.Background())
-	if exitCode(err) != exitManual {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitManual {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 	if msg := err.Error(); !strings.Contains(msg, "nft add table inet splitter") || !strings.Contains(msg, "  "+wantIPRule) {
 		t.Errorf("message:\n%s", msg)
@@ -112,7 +112,7 @@ func TestIPRuleCheckErrors(t *testing.T) {
 	h.app.cfg.Desync.Engine = desync.NFQWS
 	h.nftList = nftListingEth0
 	h.ipErr = errors.New("ip: not found")
-	if err := h.app.Run(context.Background()); exitCode(err) != exitManual || !strings.Contains(err.Error(), "cannot check the ip rules") {
+	if err := h.app.Run(context.Background()); ExitCode(err) != ExitManual || !strings.Contains(err.Error(), "cannot check the ip rules") {
 		t.Fatalf("err = %v", err)
 	}
 	// An unsupported system skips the check.
@@ -139,7 +139,7 @@ func TestReloadWithoutIPRuleKeepsEngineDown(t *testing.T) {
 	h.nftList = nftListingEth0
 	h.start()
 	h.waitOp("start nfqws2")
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.log.clear()
 	h.mu.Lock()

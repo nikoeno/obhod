@@ -186,11 +186,11 @@ func TestBlockanalyzer(t *testing.T) {
 		domain: "mitm.test",
 		want:   baWant{verdict: "TLS_MITM", stage: "verify", blocking: "confirmed", suggestion: route.Tunnel},
 	}, {
-		// The server alerts every SNI, so the swap fails too: not confirmed, and the suggestion is
-		// tunnel (DESIGN §5 Confirm; AGENTS "Suggested starting route": desync only with swap success).
+		// The server alerts every SNI, so the swap fails too: not confirmed, but the suggestion is still
+		// desync (2026-11-01: a TLS-stage block is tried with desync before the tunnel; DESIGN §7).
 		name:   "TLS alert: TLS_ALERT",
 		domain: "alert.test",
-		want:   baWant{verdict: "TLS_ALERT", stage: "tls", blocking: "likely", suggestion: route.Tunnel, swap: "TLS_ALERT"},
+		want:   baWant{verdict: "TLS_ALERT", stage: "tls", blocking: "likely", suggestion: route.Desync, swap: "TLS_ALERT"},
 	}, {
 		// The client's system resolver is ispa's, which answers its stub; DoH has the real address.
 		// The stub is TEST-NET-1 (not a bogon for dnscheck), so the verdict comes from stub learning:

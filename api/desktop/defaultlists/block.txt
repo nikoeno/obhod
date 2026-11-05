@@ -1,0 +1,8 @@
+# Static block list: domains that are always refused (no traffic is sent).
+#
+# One domain per line; '#' starts a comment; a domain also covers its
+# subdomains. This file wins over proxy.txt and candidates.txt. Changes apply
+# the next time splitter starts.
+#
+# Shipped empty. Example (remove the '#' to use it):
+# ads.example.org

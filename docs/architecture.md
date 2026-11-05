@@ -6,7 +6,7 @@ Generated from the API.md headers. docs/project-notes.md was not present when th
 
 ## 2. Rules
 
-The architecture rules (module shape, placement, import rules a-f, API.md header) are in [BOOTSTRAP.md](../BOOTSTRAP.md) section 1 and condensed in [AGENTS.md](../AGENTS.md). The `api/` tree (gateways that may import any `internal/` module, rule f) is decided in [ADR 0004](adr/0004-api-tree-and-gateway-rule.md); no gateway exists yet, so the tree and tables below list none.
+The architecture rules (module shape, placement, import rules a-f, API.md header) are in [BOOTSTRAP.md](../BOOTSTRAP.md) section 1 and condensed in [AGENTS.md](../AGENTS.md). The `api/` tree (gateways that may import any `internal/` module, rule f) is decided in [ADR 0004](adr/0004-api-tree-and-gateway-rule.md). The first gateway is `api/desktop` (the `splitter` app); it serves the control API (milestone 3) and the server-management endpoints (milestone 4).
 
 ## 3. Module tree
 
@@ -31,13 +31,16 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
     - `internal/lib/route`: defines the route kinds, domain normalization and the RouteTable shared by all modules
     - `internal/lib/testca`: creates an in-memory test certificate authority for lab and fault-server tests
     - `internal/lib/version`: holds build version information injected at link time
-  - `internal/pc`: runs the desktop app: checker, sing-box, desync engine, monitor and status page
+  - `internal/pc`: composes the desktop engine: checker, sing-box, desync engine, monitor and status page
     - `internal/pc/desync`: builds the local desync engine plan (zapret2: winws2 or nfqws2) for the desync domains
       - `internal/pc/desync/nfqws`: renders nfqws2 (zapret2) arguments, hostlist and nftables rules
       - `internal/pc/desync/winws`: renders winws2 (zapret2, WinDivert) arguments and hostlist
       - `internal/pc/lib/clashapi`: a minimal client for sing-box's Clash-compatible API
+    - `internal/pc/autodesync`: searches the desync presets for the one that fixes the blocked sites of a network, and remembers the winner per network
     - `internal/pc/monitor`: watches live connections via the Clash API, detects failures and counts traffic per route
     - `internal/pc/procman`: starts, stops, restarts and supervises child processes that die with the parent
+    - `internal/pc/servers`: parses, validates, stores and activates tunnel servers (share links and raw sing-box outbound JSON)
+    - `internal/pc/sites`: stores the user's per-site routing rules (domain + action) in a small private JSON file
     - `internal/pc/singbox`: generates and validates the sing-box config from a RouteTable
     - `internal/pc/status`: serves a local read-only status page with routes, network and VPS savings
   - `internal/router`: runs the checker on OpenWrt and keeps podkop's domain lists up to date
@@ -47,11 +50,13 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
   - `lab/fakedns`: serves the lab's DoH and plain DNS with a static zone, poisoning and a query log
   - `lab/fakedpi`: emulates TSPU-like blocking on packets via NFQUEUE inside a lab namespace
   - `lab/netns`: creates and tears down network namespaces, veth links and routes for the lab
+- `api/desktop`: the splitter app: command line in front of `internal/pc` (HTTP API gateway for the desktop UI, ADR 0004)
 
 ## 4. Placement
 
 | Path | Kind | Consumers | Children | Status |
 |---|---|---|---|---|
+| `api/desktop` | app | cmd/splitter | – | implemented (CLI, control API, server management) |
 | `internal/blockanalyzer` | app | cmd/blockanalyzer | – | design ready (see internal/lib/analyzer/AGENTS.md) |
 | `internal/lib/analyzer` | lib | internal/blockanalyzer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/netwatch, internal/pc, internal/pc/monitor, internal/router, lab, lab/fakeasn | internal/lib/analyzer/classify, internal/lib/analyzer/dnscheck, internal/lib/analyzer/dialer, internal/lib/analyzer/lib/verdict | design ready (see DESIGN.md, AGENTS.md) |
 | `internal/lib/analyzer/classify` | child | internal/lib/analyzer | – | design ready |
@@ -65,21 +70,24 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 | `internal/lib/checker/netwatch` | child | internal/lib/checker | – | implemented |
 | `internal/lib/checker/schedule` | child | internal/lib/checker | – | implemented |
 | `internal/lib/checker/store` | child | internal/lib/checker | – | implemented |
-| `internal/lib/clock` | lib | internal/lib/analyzer, internal/lib/checker, internal/lib/checker/netwatch, internal/lib/checker/schedule, internal/lib/checker/store, internal/pc, internal/pc/monitor, internal/pc/procman, internal/router | – | planned |
+| `internal/lib/clock` | lib | internal/lib/analyzer, internal/lib/checker, internal/lib/checker/netwatch, internal/lib/checker/schedule, internal/lib/checker/store, internal/pc, internal/pc/autodesync, internal/pc/monitor, internal/pc/procman, internal/router | – | planned |
 | `internal/lib/faultserver` | test-only | internal/lib/analyzer, lab | – | implemented (M3, lab L2) |
 | `internal/lib/netif` | lib | internal/lib/analyzer/dialer, internal/lib/checker/netwatch, internal/pc, internal/pc/desync | – | planned |
 | `internal/lib/paths` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
 | `internal/lib/proc` | lib | internal/lib/analyzer, internal/pc, internal/pc/procman | – | planned |
-| `internal/lib/route` | lib | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop, lab | – | planned |
+| `internal/lib/route` | lib | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/sites, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop, lab | – | planned |
 | `internal/lib/testca` | test-only | internal/lib/analyzer, internal/lib/faultserver, lab | – | planned |
 | `internal/lib/version` | lib | internal/blockanalyzer, internal/pc, internal/router | – | implemented |
-| `internal/pc` | app | cmd/splitter | internal/pc/singbox, internal/pc/desync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/lib/clashapi | implemented |
+| `internal/pc` | child | api/desktop | internal/pc/singbox, internal/pc/desync, internal/pc/autodesync, internal/pc/procman, internal/pc/monitor, internal/pc/status, internal/pc/servers, internal/pc/sites, internal/pc/lib/clashapi | implemented |
 | `internal/pc/desync` | child | internal/pc | internal/pc/desync/winws, internal/pc/desync/nfqws | implemented |
 | `internal/pc/desync/nfqws` | child | internal/pc/desync | – | implemented |
 | `internal/pc/desync/winws` | child | internal/pc/desync | – | implemented |
 | `internal/pc/lib/clashapi` | lib | internal/pc, internal/pc/monitor, internal/pc/status | – | implemented |
 | `internal/pc/monitor` | child | internal/pc | – | implemented |
 | `internal/pc/procman` | child | internal/pc | – | implemented |
+| `internal/pc/servers` | child | internal/pc | – | implemented |
+| `internal/pc/sites` | child | internal/pc | – | implemented |
+| `internal/pc/autodesync` | child | internal/pc | – | implemented |
 | `internal/pc/singbox` | child | internal/pc | – | implemented |
 | `internal/pc/status` | child | internal/pc | – | implemented |
 | `internal/router` | app | cmd/splitter-router | internal/router/podkop | planned |
@@ -95,5 +103,5 @@ The architecture rules (module shape, placement, import rules a-f, API.md header
 | Binary | App module |
 |---|---|
 | `blockanalyzer` | `internal/blockanalyzer` |
-| `splitter` | `internal/pc` |
+| `splitter` | `api/desktop` |
 | `splitter-router` | `internal/router` |

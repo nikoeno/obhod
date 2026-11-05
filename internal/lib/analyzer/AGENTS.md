@@ -114,8 +114,9 @@ A hint only, clearly labeled as a suggestion in the report; the real decision lo
 | Direct result | Suggested route |
 |---|---|
 | `OK`, `OK_REDIRECT` | `direct` |
-| `TLS_RST` / `TLS_TIMEOUT` / `TLS_SPOOF` / `TLS_ALERT` with SNI-swap success | `desync` |
-| `TCP_TIMEOUT`, `TCP_REFUSED` (with calibration OK) | `tunnel` |
+| `TLS_RST` / `TLS_TIMEOUT` / `TLS_EOF` / `TLS_SPOOF` / `TLS_ALERT`, **whatever the SNI swap says** (changed 2026-11-01; the swap only changes the note) | `desync` |
+| `HTTP_RST` (the reset comes after a good TLS handshake; added 2026-11-01) | `desync` |
+| `TCP_TIMEOUT`, `TCP_REFUSED` (with calibration OK): the only failures that suggest the tunnel from the first packets | `tunnel` |
 | `STALL_16_20` | `tunnel` |
 | `DNS_POISONED` | `direct` + note "needs DoH" |
 | `TLS_MITM`, `HTTP_STUB` | `tunnel` |

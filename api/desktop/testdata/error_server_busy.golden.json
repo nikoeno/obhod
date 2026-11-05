@@ -1,0 +1,4 @@
+{
+  "error": "The engine is busy connecting or disconnecting, or the server is in use. Try again in a moment.",
+  "code": "busy"
+}

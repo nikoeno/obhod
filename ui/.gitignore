@@ -1,0 +1,16 @@
+# JavaScript
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.vite/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/WixTools/
+
+# local
+.env
+.env.*
+*.log

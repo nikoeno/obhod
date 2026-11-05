@@ -33,12 +33,14 @@ func TestCandidateDirectOnly(t *testing.T) {
 		{"TLS_MITM", route.Tunnel},
 		{"HTTP_STUB", route.Tunnel},
 		{"STALL_16_20", route.Tunnel},
-		{"TLS_RST", route.Tunnel}, // no SNI-swap evidence: the address itself looks blocked
-		{"TLS_TIMEOUT", route.Tunnel},
-		{"TLS_ALERT", route.Tunnel},
-		{"TLS_SPOOF", route.Tunnel},
-		{"TLS_EOF", route.Tunnel},
-		{"HTTP_RST", ""},
+		// 2026-11-01: a block at the TLS stage, or an HTTP-stage reset after a good TLS, suggests desync
+		// whatever the SNI swap says (no swap evidence here); only failures at TCP connect say tunnel.
+		{"TLS_RST", route.Desync},
+		{"TLS_TIMEOUT", route.Desync},
+		{"TLS_ALERT", route.Desync},
+		{"TLS_SPOOF", route.Desync},
+		{"TLS_EOF", route.Desync},
+		{"HTTP_RST", route.Desync},
 		{"READ_TIMEOUT", ""},
 		{"CONN_LIMITED", ""},
 		{"LOCAL_ERROR", ""},
@@ -121,7 +123,7 @@ func TestNeverEmitsStaticRoutes(t *testing.T) {
 }
 
 func TestFirstDecision(t *testing.T) {
-	out := Decide(Input{Domain: "a.com", Results: direct("TLS_RST"), Now: t0})
+	out := Decide(Input{Domain: "a.com", Results: direct("TCP_TIMEOUT"), Now: t0})
 	d := out.Decision
 	if !out.Changed || d.Route != route.Tunnel || d.Source != route.SourceChecked || d.Pending != nil {
 		t.Fatalf("unexpected: %+v", out)
@@ -129,7 +131,7 @@ func TestFirstDecision(t *testing.T) {
 	if d.Domain != "a.com" || !d.DecidedAt.Equal(t0) || !d.CheckedAt.Equal(t0) || !d.ExpiresAt.Equal(t0.Add(24*time.Hour)) {
 		t.Errorf("times/domain wrong: %+v", d)
 	}
-	if d.Last[route.Direct] != "TLS_RST" {
+	if d.Last[route.Direct] != "TCP_TIMEOUT" {
 		t.Errorf("Last = %v", d.Last)
 	}
 }
@@ -166,7 +168,7 @@ func run(p Policy, start *model.Decision, verdicts ...string) []route.Route {
 }
 
 func TestHysteresis(t *testing.T) {
-	const back, block = "OK", "TLS_RST" // OK → direct, TLS_RST → tunnel
+	const back, block = "OK", "TCP_TIMEOUT" // OK → direct, TCP_TIMEOUT → tunnel
 	cases := []struct {
 		name string
 		p    Policy
@@ -194,7 +196,7 @@ func TestHysteresis(t *testing.T) {
 
 func TestStalePendingReplaced(t *testing.T) {
 	cur := &model.Decision{Domain: "a.com", Route: route.Direct, Pending: &model.Pending{Route: route.Desync, Count: 5, Since: t0.Add(-time.Hour)}}
-	out := Decide(Input{Domain: "a.com", Current: cur, Results: direct("TLS_RST"), Now: t0}) // candidate: tunnel
+	out := Decide(Input{Domain: "a.com", Current: cur, Results: direct("TCP_TIMEOUT"), Now: t0}) // candidate: tunnel
 	p := out.Decision.Pending
 	if out.Changed || p == nil || p.Route != route.Tunnel || p.Count != 1 || !p.Since.Equal(t0) {
 		t.Errorf("stale pending not replaced: %+v", out.Decision)
@@ -220,8 +222,45 @@ func TestTTLRefreshWithoutChange(t *testing.T) {
 
 func TestSwitchSetsDecidedAt(t *testing.T) {
 	cur := &model.Decision{Domain: "a.com", Route: route.Direct, DecidedAt: t0.Add(-time.Hour), Pending: &model.Pending{Route: route.Tunnel, Count: 1}}
-	out := Decide(Input{Domain: "a.com", Current: cur, Results: direct("TLS_RST"), Now: t0})
+	out := Decide(Input{Domain: "a.com", Current: cur, Results: direct("TCP_TIMEOUT"), Now: t0})
 	if !out.Changed || out.Decision.Route != route.Tunnel || !out.Decision.DecidedAt.Equal(t0) || out.Decision.Pending != nil {
 		t.Errorf("unexpected: %+v", out)
+	}
+}
+
+// The TLS-stage rule of 2026-11-01 (analyzer.SuggestRoute): the SNI-swap outcome does not change the route,
+// and the preference stays direct > desync > tunnel.
+func TestTLSBlockSuggestsDesyncWhateverTheSwapSays(t *testing.T) {
+	swaps := map[string]*analyzer.SNISwapResult{
+		"no swap":     nil,
+		"swap worked": {SNI: "n", Verdict: "OK"},
+		"swap failed": {SNI: "n", Verdict: "TLS_TIMEOUT"},
+	}
+	for _, v := range []string{"TLS_RST", "TLS_TIMEOUT", "TLS_EOF", "TLS_ALERT", "HTTP_RST"} {
+		for name, sw := range swaps {
+			r := res(route.Direct, v)
+			r.Evidence.SNISwap = sw
+			got, ok, _ := Candidate(map[route.Route]analyzer.ProbeResult{route.Direct: r}, nil)
+			if !ok || got != route.Desync {
+				t.Errorf("%s, %s: got (%q,%v), want desync", v, name, got, ok)
+			}
+		}
+	}
+	// Only a failure at TCP connect says tunnel.
+	for _, v := range []string{"TCP_TIMEOUT", "TCP_REFUSED"} {
+		if got, ok, _ := Candidate(direct(v), nil); !ok || got != route.Tunnel {
+			t.Errorf("%s: got (%q,%v), want tunnel", v, got, ok)
+		}
+	}
+	// With several routes probed, direct still beats desync and desync beats tunnel.
+	full := map[route.Route]analyzer.ProbeResult{
+		route.Direct: res(route.Direct, "TLS_RST"), route.Desync: res(route.Desync, "OK"), route.Tunnel: res(route.Tunnel, "OK"),
+	}
+	if got, _, _ := Candidate(full, nil); got != route.Desync {
+		t.Errorf("full results: %q, want desync", got)
+	}
+	full[route.Direct] = res(route.Direct, "OK")
+	if got, _, _ := Candidate(full, nil); got != route.Direct {
+		t.Errorf("full results, direct ok: %q, want direct", got)
 	}
 }

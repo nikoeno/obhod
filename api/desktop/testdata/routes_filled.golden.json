@@ -1,0 +1,35 @@
+[
+  {
+    "domain": "example.org",
+    "route": "direct",
+    "source": "checked",
+    "since": "2026-10-31T12:00:00Z",
+    "lastCheck": "2026-10-31T12:05:00Z",
+    "history": [],
+    "degraded": false
+  },
+  {
+    "domain": "video.example",
+    "route": "desync",
+    "source": "checked",
+    "since": "2026-10-31T12:05:00Z",
+    "lastCheck": "2026-10-31T12:05:00Z",
+    "history": [
+      {
+        "From": "tunnel",
+        "To": "desync",
+        "At": "2026-10-31T12:05:00Z"
+      }
+    ],
+    "degraded": false
+  },
+  {
+    "domain": "vpn-only.example",
+    "route": "tunnel",
+    "source": "static",
+    "since": "2026-10-31T12:00:00Z",
+    "lastCheck": "2026-10-31T12:05:00Z",
+    "history": [],
+    "degraded": false
+  }
+]

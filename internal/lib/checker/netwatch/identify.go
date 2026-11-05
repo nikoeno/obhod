@@ -31,11 +31,23 @@ func gatewayID(salt string, ifc netif.Interface) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+// localID is the last-resort ID built from facts every OS gives offline: the uplink adapter's name and the
+// default gateway address, hashed with the per-install salt. It returns "" without both. A bare gateway IP
+// (192.168.1.1) is shared by countless networks, so this tells adapters/gateways apart on one install, not ISPs.
+func localID(salt string, ifc netif.Interface) string {
+	if ifc.Name == "" || !ifc.Gateway.IsValid() {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(salt + "|local|" + ifc.Name + "|" + ifc.Gateway.String()))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
 // identify determines the current network and publishes it.
 //
 //  1. Uplink → public IP (direct) → ASN gives "asn:<n>"; with IncludeGateway, "asn:<n>/gw:<hash>".
 //  2. Without an ASN, a gateway hash gives "gw:<hash>".
-//  3. When the lookup fails but the uplink is the one the last identification used, the last ID is kept
+//  3. With neither, an adapter+gateway hash gives "local:<hash>" (see localID).
+//  4. When the lookup fails but the uplink is the one the last identification used, the last ID is kept
 //     (a flaky echo service must not flip the network); otherwise the network is unknown.
 func (w *Watcher) identify(ctx context.Context) {
 	ifc, err := w.deps.Uplink(ctx)
@@ -75,6 +87,8 @@ func (w *Watcher) identify(ctx context.Context) {
 		}
 		if gw != "" {
 			id = model.NetworkID("gw:" + gw)
+		} else if l := localID(w.cfg.Salt, ifc); l != "" {
+			id = model.NetworkID("local:" + l)
 		}
 	}
 	if !id.Valid() {

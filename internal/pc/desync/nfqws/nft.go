@@ -24,7 +24,7 @@ import (
 // and semicolons survive the shell. The table is flushed right after it is
 // added, so running the commands again replaces the rules instead of
 // appending a second copy.
-func nftRules(uplink string, qnum uint16, mark uint32, ports []uint16, excludeIPs []netip.Prefix, excludePorts [][2]uint16) []string {
+func nftRules(uplink string, qnum uint16, mark uint32, ports, udpPorts []uint16, excludeIPs []netip.Prefix, excludePorts [][2]uint16) []string {
 	var v4, v6 []string
 	for _, p := range excludeIPs {
 		p = p.Masked()
@@ -45,10 +45,7 @@ func nftRules(uplink string, qnum uint16, mark uint32, ports []uint16, excludeIP
 		}
 	}
 	sort.Strings(sports)
-	dports := make([]string, len(ports))
-	for i, p := range ports {
-		dports[i] = strconv.Itoa(int(p))
-	}
+	dports := portStrings(ports)
 
 	cmds := []string{
 		"nft add table inet " + table,
@@ -66,11 +63,25 @@ func nftRules(uplink string, qnum uint16, mark uint32, ports []uint16, excludeIP
 	}
 	cmds = append(cmds,
 		stmt(`add rule inet %s postrouting oifname "%s" tcp dport { %s } meta mark and 0x%08x == 0 ct original packets 1-12 queue num %d bypass`,
-			table, uplink, strings.Join(dports, ", "), mark, qnum),
+			table, uplink, strings.Join(dports, ", "), mark, qnum))
+	if len(udpPorts) > 0 {
+		cmds = append(cmds,
+			stmt(`add rule inet %s postrouting oifname "%s" udp dport { %s } meta mark and 0x%08x == 0 ct original packets 1-12 queue num %d bypass`,
+				table, uplink, strings.Join(portStrings(udpPorts), ", "), mark, qnum))
+	}
+	cmds = append(cmds,
 		stmt("add chain inet %s output { type filter hook output priority -401; }", table),
 		stmt("add rule inet %s output meta mark and 0x%08x != 0 notrack", table, mark),
 	)
 	return cmds
+}
+
+func portStrings(ports []uint16) []string {
+	out := make([]string, len(ports))
+	for i, p := range ports {
+		out[i] = strconv.Itoa(int(p))
+	}
+	return out
 }
 
 // nftDown returns the command that removes the table and nothing else.

@@ -1,0 +1,14 @@
+{
+  "protocol": "shadowsocks",
+  "host": "203.0.113.5",
+  "port": 8388,
+  "engine": "singbox",
+  "name": "Shadowsocks",
+  "outbound": {
+    "method": "aes-256-gcm",
+    "password": "fake-password-1",
+    "server": "203.0.113.5",
+    "server_port": 8388,
+    "type": "shadowsocks"
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "error": "A search is already running, or the app is not connected.",
+  "code": "busy"
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"net/netip"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,13 +14,18 @@ import (
 	"github.com/nikoejento/obhod/internal/lib/route"
 	"github.com/nikoejento/obhod/internal/pc/desync"
 	"github.com/nikoejento/obhod/internal/pc/singbox"
+	"github.com/nikoejento/obhod/internal/pc/status"
 )
+
+// noTunnelExclude fills desync.Config.ExcludeIPs when no tunnel server is in use.
+var noTunnelExclude = netip.MustParsePrefix("192.0.2.1/32")
 
 // rendered is the output of the two generators for one table.
 type rendered struct {
 	plan    desync.Plan
 	planErr error // the plan could not be built; the sing-box config is still valid
 	singBox []byte
+	tunnel  bool // the sing-box config has a tunnel outbound (false: degraded mode)
 }
 
 // render builds the desync plan (when wantPlan) and the sing-box config for t.
@@ -34,21 +40,31 @@ func (a *App) render(ctx context.Context, b binaries, t route.Table, wantPlan bo
 	scfg.Binary = b.singBox
 	scfg.ClashSecret = a.currentSecret()
 	scfg.OwnProcesses = a.ownProcesses(b)
-	out, err := singbox.Generate(scfg, a.outbounds, t)
+	ob := a.outbounds
+	ob.TunnelDirect = len(ob.Tunnel) == 0 // no server in use: tunnel routes go direct, never anywhere else
+	out, err := singbox.Generate(scfg, ob, t)
 	if err != nil {
-		return r, fail(exitConfig, "sing-box config: %v", err)
+		return r, fail(ExitConfig, "sing-box config: %w", err)
 	}
 	r.singBox = out
+	r.tunnel = !ob.TunnelDirect
 	return r, nil
 }
 
 // buildPlan builds the desync plan for t. Without desync domains there is
 // nothing to run, so no address to protect and no uplink are needed.
 func (a *App) buildPlan(ctx context.Context, b binaries, t route.Table) (desync.Plan, error) {
+	// While a desync search runs the engine is held at the trial: its preset and exactly the trial sites.
+	a.dsMu.Lock()
+	trial := a.dsTrial
+	a.dsMu.Unlock()
+	if trial != nil {
+		t = trialTable(trial.domains)
+	}
 	if len(t.Domains(route.Desync)) == 0 {
 		return desync.Plan{}, nil
 	}
-	dcfg := a.cfg.Desync
+	dcfg := a.desyncConfig(t.NetworkID)
 	dcfg.Binary = b.desync
 	a.mu.Lock()
 	resolved := a.tunnelAddrs
@@ -56,18 +72,23 @@ func (a *App) buildPlan(ctx context.Context, b binaries, t route.Table) (desync.
 	// A host-name tunnel is protected only by the addresses it resolved to:
 	// an unrelated desync.exclude_ips entry must not count as protection.
 	if tunnelHost(a.outbounds.Tunnel) != "" && len(resolved) == 0 {
-		return desync.Plan{}, fail(exitConfig, "%v", errTunnelUnresolved)
+		return desync.Plan{}, fail(ExitConfig, "%w", errTunnelUnresolved)
 	}
 	dcfg.ExcludeIPs = excludeIPs(dcfg.ExcludeIPs, a.outbounds.Tunnel, resolved...)
 	if len(dcfg.ExcludeIPs) == 0 {
-		return desync.Plan{}, fail(exitConfig, "%v", errNoExclude)
+		if len(a.outbounds.Tunnel) > 0 {
+			return desync.Plan{}, fail(ExitConfig, "%v", errNoExclude)
+		}
+		// No tunnel server, so nothing to protect; the desync module wants an address, and a
+		// documentation address (RFC 5737) is never routed.
+		dcfg.ExcludeIPs = []netip.Prefix{noTunnelExclude}
 	}
 	if b.desync == "" {
-		return desync.Plan{}, fail(exitConfig, "the desync engine binary was not found; set desync.binary or put it next to the executable")
+		return desync.Plan{}, fail(ExitConfig, "%w: the desync engine binary was not found; set desync.binary or put it next to the executable", errProgramMissing)
 	}
 	up, err := a.d.uplink(ctx)
 	if err != nil {
-		return desync.Plan{}, fail(exitRuntime, "no uplink interface: %v", err)
+		return desync.Plan{}, fail(ExitRuntime, "no uplink interface: %v", err)
 	}
 	// Our own TUN must never be taken for the uplink, whatever netif thinks.
 	if up.Name == a.tunName() {
@@ -76,9 +97,19 @@ func (a *App) buildPlan(ctx context.Context, b binaries, t route.Table) (desync.
 	plan, err := desync.Build(dcfg, up, t)
 	switch {
 	case errors.Is(err, desync.ErrNoExcludeIP), errors.Is(err, desync.ErrInvalidConfig):
-		return desync.Plan{}, fail(exitConfig, "%v", err)
+		return desync.Plan{}, fail(ExitConfig, "%v", err)
 	case err != nil:
-		return desync.Plan{}, fail(exitRuntime, "desync plan: %v", err)
+		return desync.Plan{}, fail(ExitRuntime, "desync plan: %v", err)
+	}
+	// The preset's fake payloads sit in a folder next to the engine; a missing
+	// one is a packaging problem, reported like a missing program.
+	if a.d.fileExists != nil {
+		for _, f := range plan.Requires {
+			if !a.d.fileExists(f) {
+				return desync.Plan{}, fail(ExitConfig, "%w: the fake payload %s of the desync preset %q was not found; put it in the %s folder next to the desync engine (%w)",
+					errProgramMissing, filepath.Base(f), dcfg.PresetID(), desync.FakeDir, errPayloadMissing)
+			}
+		}
 	}
 	return plan, nil
 }
@@ -181,6 +212,12 @@ func (a *App) reloadLoop(ctx context.Context, tables <-chan route.Table) {
 			if retry := a.reload(ctx); retry > 0 {
 				arm(retry)
 			}
+			_ = a.startSearch(searchAuto) // sites that wait for a desync search, now that the table is applied
+		case <-a.kick: // a server was activated, or the desync choice or a search result changed: apply it now
+			if retry := a.reload(ctx); retry > 0 {
+				arm(retry)
+			}
+			_ = a.startSearch(searchAuto)
 		}
 	}
 }
@@ -198,17 +235,27 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 	}
 	defer a.op.Unlock()
 
-	t := a.d.checker.Table()
-	a.setTable(t)
+	a.setTable(a.d.checker.Table())
+	t := a.currentTable() // the checker's table with the desync results applied
+	connected := a.State() == StateConnected
+	if len(a.outbounds.Tunnel) == 0 && !connected {
+		return 0 // no server in use and nothing running: the next connect renders the config
+	}
 	bins, err := a.resolveBinaries()
 	if err != nil {
 		a.log.Error("reload", "err", err)
 		return 0
 	}
-	connected := a.State() == StateConnected
+	act := a.pendingActivation() // a server activated while connected, not applied yet
+	if !connected {
+		act = nil
+	}
 	r, err := a.render(ctx, bins, t, connected)
 	if err != nil {
 		a.log.Error("reload: generate", "err", err)
+		if act != nil {
+			a.rollbackActivation(act)
+		}
 		return 0
 	}
 	cfgFile := filepath.Join(a.p.Run, singBoxFileName)
@@ -225,6 +272,9 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 	cand, err := a.prepareSingBox(ctx, bins, r.singBox, cfgFile)
 	if err != nil {
 		a.log.Error("reload: new sing-box config rejected, keeping the old one", "err", err)
+		if act != nil {
+			a.rollbackActivation(act)
+		}
 		return 0
 	}
 
@@ -232,10 +282,14 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 	// built leaves the engine as it is; sing-box is still updated.
 	if r.planErr != nil {
 		a.log.Error("reload: desync plan failed; the engine keeps its current state", "err", r.planErr)
+		a.desyncProblem("", r.planErr)
 	} else {
 		a.applyEngine(ctx, r.plan)
 	}
 	if cand == "" {
+		if act != nil {
+			a.clearPending() // sing-box already runs this config
+		}
 		return 0
 	}
 	a.mu.Lock()
@@ -252,11 +306,17 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 	if err := os.Rename(cfgFile, backup); err != nil && !errors.Is(err, os.ErrNotExist) {
 		_ = os.Remove(cand)
 		a.log.Error("reload: keep a copy of the sing-box config", "err", err)
+		if act != nil {
+			a.rollbackActivation(act)
+		}
 		return 0
 	}
 	if err := os.Rename(cand, cfgFile); err != nil {
 		_ = os.Rename(backup, cfgFile)
 		a.log.Error("reload: replace sing-box config", "err", err)
+		if act != nil {
+			a.rollbackActivation(act)
+		}
 		return 0
 	}
 	sctx, cancel := context.WithTimeout(ctx, startTimeout)
@@ -270,6 +330,10 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 			rerr = a.d.procs.Restart(rctx, nameSingBox, a.singBoxSpec(bins, cfgFile))
 			rcancel()
 		}
+		if act != nil {
+			a.rollbackActivation(act)
+			a.reapplyEngine(ctx, bins, t) // the engine may have taken the new server's addresses
+		}
 		if rerr != nil {
 			a.singBoxLostLocked(ctx, errors.Join(err, rerr))
 			return 0
@@ -282,15 +346,29 @@ func (a *App) reload(ctx context.Context) (retry time.Duration) {
 	}
 	a.mu.Lock()
 	a.lastSBRun = a.d.clk.Now()
+	a.sbTunnel = r.tunnel
 	a.mu.Unlock()
+	if act != nil {
+		a.clearPending()
+	}
 	_ = os.Remove(backup)
-	a.log.Info("sing-box restarted with a new config")
+	a.log.Info("sing-box restarted with a new config", "tunnel", r.tunnel)
 	return 0
+}
+
+// reapplyEngine renders the desync plan again from the current (restored)
+// tunnel outbound and applies it. Errors are logged.
+func (a *App) reapplyEngine(ctx context.Context, b binaries, t route.Table) {
+	r, err := a.render(ctx, b, t, true)
+	if err != nil || r.planErr != nil {
+		return
+	}
+	a.applyEngine(ctx, r.plan)
 }
 
 // applyEngine brings the engine in line with plan. Errors are logged: a
 // broken engine must not take the tunnel down with it.
-func (a *App) applyEngine(ctx context.Context, plan desync.Plan) {
+func (a *App) applyEngine(ctx context.Context, plan desync.Plan) error {
 	a.mu.Lock()
 	eng := a.engine
 	a.mu.Unlock()
@@ -301,18 +379,20 @@ func (a *App) applyEngine(ctx context.Context, plan desync.Plan) {
 			defer cancel()
 			if err := a.d.procs.Stop(sctx, eng.name); err != nil {
 				a.log.Error("reload: stop desync engine", "err", err)
+				return err
 			}
 			a.mu.Lock()
 			a.engine = engineState{}
 			a.mu.Unlock()
 			a.log.Info("desync engine stopped: no desync domains")
 		}
-		return
+		a.clearProblem(status.ProblemDesyncFailed) // nothing needs the engine any more
+		return nil
 	}
 	setup := strings.Join(plan.Setup, "\n")
 	if eng.running && eng.name == string(plan.Engine) && eng.args == strings.Join(plan.Args, "\x00") &&
 		sameFiles(eng.files, plan.Files) && eng.setup == setup {
-		return
+		return nil
 	}
 	// G13: whether the engine re-reads its hostlist is unverified, so any change restarts it.
 	// Changed nft rules (Linux: new uplink or tunnel address) need the human
@@ -320,12 +400,14 @@ func (a *App) applyEngine(ctx context.Context, plan desync.Plan) {
 	if !eng.running || eng.setup != setup {
 		if err := a.checkNFT(ctx, plan); err != nil {
 			a.log.Error("reload: desync engine not (re)started", "err", err)
-			return
+			a.desyncProblem("", err)
+			return err
 		}
 	}
 	if err := a.writePlanFiles(plan); err != nil {
 		a.log.Error("reload: write desync files", "err", err)
-		return
+		a.desyncProblem("", err)
+		return err
 	}
 	sctx, cancel := context.WithTimeout(ctx, stepTimeout)
 	defer cancel()
@@ -337,9 +419,12 @@ func (a *App) applyEngine(ctx context.Context, plan desync.Plan) {
 	}
 	if err != nil {
 		a.log.Error("reload: start desync engine", "err", err)
-		return
+		a.desyncProblem(string(plan.Engine), err)
+		return err
 	}
 	a.rememberEngine(plan)
+	a.clearProblem(status.ProblemDesyncFailed)
+	return nil
 }
 
 func sameFiles(old map[string]string, now map[string][]byte) bool {

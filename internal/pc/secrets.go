@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -15,6 +16,13 @@ import (
 // loadSecrets reads the outbound definitions named in cfg from p.Secrets. An
 // error names the file, never its content.
 func loadSecrets(cfg SecretsConfig, p paths.Paths) (singbox.Outbounds, error) {
+	return loadSecretsFor(cfg, p, false)
+}
+
+// loadSecretsFor is loadSecrets; with optionalTunnel (UI mode) a tunnel file
+// that does not exist is no error and leaves Outbounds.Tunnel empty. A file
+// that exists but is not a JSON object is always an error.
+func loadSecretsFor(cfg SecretsConfig, p paths.Paths, optionalTunnel bool) (singbox.Outbounds, error) {
 	read := func(name string) (json.RawMessage, error) {
 		file := filepath.Join(p.Secrets, name)
 		b, err := os.ReadFile(file)
@@ -30,7 +38,10 @@ func loadSecrets(cfg SecretsConfig, p paths.Paths) (singbox.Outbounds, error) {
 	var ob singbox.Outbounds
 	var err error
 	if ob.Tunnel, err = read(cfg.Tunnel); err != nil {
-		return singbox.Outbounds{}, err
+		if !(optionalTunnel && errors.Is(err, fs.ErrNotExist)) {
+			return singbox.Outbounds{}, err
+		}
+		ob.Tunnel = nil
 	}
 	if cfg.Proxy != "" {
 		if ob.Proxy, err = read(cfg.Proxy); err != nil {

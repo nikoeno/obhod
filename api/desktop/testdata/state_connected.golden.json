@@ -1,0 +1,58 @@
+{
+  "state": "connected",
+  "error": null,
+  "checking": true,
+  "snapshot": {
+    "Version": "splitter test",
+    "State": "connected",
+    "Network": "AS64500 Example",
+    "LastCheck": "2026-10-31T12:05:00Z",
+    "NextCheck": "2026-10-31T13:05:00Z",
+    "Routes": {
+      "desync": 1,
+      "direct": 1,
+      "tunnel": 1
+    },
+    "Traffic": {
+      "direct": 3000,
+      "tunnel": 1000
+    },
+    "Savings": 0.75,
+    "Processes": [
+      {
+        "Name": "splitter",
+        "State": "running",
+        "Restarts": 0
+      },
+      {
+        "Name": "sing-box",
+        "State": "running",
+        "Restarts": 0
+      },
+      {
+        "Name": "desync",
+        "State": "running",
+        "Restarts": 1
+      }
+    ],
+    "Warnings": [
+      "sing-box's Clash API is not answering"
+    ],
+    "Recent": [
+      {
+        "Domain": "video.example",
+        "From": "tunnel",
+        "To": "desync",
+        "At": "2026-10-31T12:05:00Z"
+      }
+    ],
+    "Tunnel": "ready",
+    "Problems": []
+  },
+  "networks": [
+    {
+      "label": "AS64500 Example",
+      "since": "2026-10-31T12:00:00Z"
+    }
+  ]
+}

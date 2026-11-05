@@ -34,7 +34,33 @@ type Snapshot struct {
 	Processes []Process
 	Warnings  []string
 	Recent    []Change // last route changes
+	// Tunnel is TunnelReady when a detour server is in use, TunnelNone when there is none: then the routes
+	// that name the tunnel are served direct (empty from an older source: unknown).
+	Tunnel string
+	// Problems are things that do not work although the app is connected (added 2026-11-01); never nil
+	// from the pc app, empty when everything works.
+	Problems []Problem
 }
+
+// Problem is one thing that does not work. Message is a fixed user-safe sentence; Detail is a bounded
+// sanitized excerpt (exit status and the last output lines of the process) for a details box.
+type Problem struct {
+	Code    string // one of the Problem* codes
+	Message string // fixed sentence: no paths, addresses or secrets
+	Detail  string // at most 2 KB, sanitized; may be empty
+}
+
+// The codes of Problem.Code. The set may grow: unknown codes are shown with their Message.
+const (
+	ProblemDesyncFailed       = "desync_failed"        // the desync program (winws2/nfqws2) gave up or cannot start
+	ProblemTunnelEngineFailed = "tunnel_engine_failed" // sing-box gave up while connected
+)
+
+// The values of Snapshot.Tunnel.
+const (
+	TunnelReady = "ready"
+	TunnelNone  = "none"
+)
 
 // Process is one managed process.
 type Process struct {

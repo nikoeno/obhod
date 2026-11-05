@@ -9,10 +9,12 @@ func modelID(id string) model.NetworkID { return model.NetworkID(id) }
 
 // rebuild computes the table for the current network from the lists and the store, and publishes it if it
 // changed: static entries, then a stored decision per candidate, or UnknownDefault (source default) for
-// candidates without one. On an unknown network every candidate gets the default.
+// candidates without one. On an unknown network every candidate gets the default. User rules (SetOverrides)
+// come last and win for their own domain.
 func (c *Checker) rebuild() {
 	c.mu.Lock()
 	net := c.cur
+	over := c.overrides
 	c.mu.Unlock()
 
 	stored := map[string]model.Decision{}
@@ -30,6 +32,7 @@ func (c *Checker) rebuild() {
 		}
 		entries = append(entries, route.Entry{Domain: dom, Route: c.cfg.UnknownDefault, Source: route.SourceDefault})
 	}
+	entries = append(entries, over...) // user rules beat list entries of the same domain (route.NewTable)
 	id := ""
 	if net.Known {
 		id = net.ID

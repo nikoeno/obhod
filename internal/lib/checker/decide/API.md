@@ -51,7 +51,7 @@ func Candidate(results map[route.Route]analyzer.ProbeResult, order []route.Route
 ## Behavior / contract
 
 - **Full results** (several routes probed): the first route in `Order` whose result is `OK`/`OK_REDIRECT` wins. If all probed routes fail → "site down", no conclusion, keep current.
-- **Direct only** (current scope): use `analyzer.SuggestRoute(direct)`. `LOCAL_ERROR`/`UNKNOWN` → no conclusion.
+- **Direct only** (current scope): use `analyzer.SuggestRoute(direct)`. `LOCAL_ERROR`/`UNKNOWN` → no conclusion. Since 2026-11-01 (the rule is in the analyzer, `DESIGN.md` §7) a TLS-stage failure (`TLS_RST`, `TLS_TIMEOUT`, `TLS_EOF`, `TLS_ALERT`, `TLS_SPOOF`) and `HTTP_RST` give `desync` whatever the SNI swap says; only `TCP_TIMEOUT`/`TCP_REFUSED` (and `STALL_16_20`, `TLS_MITM`, `HTTP_STUB`) give `tunnel`. The preference order stays direct > desync > tunnel (`Policy.Order`) when several routes were probed. A decision `desync` made this way is a *candidate* until a desync trial has reached the site; that bookkeeping is not here: the decision stays `desync`/`checked` and `internal/pc` tracks `pending | verified | failed` on top of it (`internal/pc/API.md`, "Desync presets: automatic selection").
 - **Hysteresis:** the candidate differs from current → increment `Pending`. Switch when `Pending.Count >= Confirmations`. The candidate equals current → clear `Pending`.
 - **No current decision:** adopt the first conclusive candidate immediately (there's nothing to protect).
 - `CheckedAt`/`ExpiresAt` are refreshed on every conclusive run, even without a change.
@@ -67,7 +67,7 @@ None (pure).
 
 ## Testing
 
-Exhaustive table tests: every verdict combination, hysteresis sequences (flip-flop never switches), site down, first decision, TTL refresh.
+Exhaustive table tests (2026-11-01: `TestCandidateDirectOnly` for every verdict, `TestTLSBlockSuggestsDesyncWhateverTheSwapSays` for the swap outcomes and the order direct > desync > tunnel): every verdict combination, hysteresis sequences (flip-flop never switches), site down, first decision, TTL refresh.
 
 ## Out of scope
 

@@ -45,6 +45,8 @@ type checkerAPI interface {
 	Table() route.Table
 	Subscribe() (<-chan route.Table, func())
 	ReportFailure(f checker.Failure)
+	CheckNow(domains ...string)
+	SetOverrides(entries []route.Entry) error // the user's per-site rules (sites.go)
 	Status() checker.Status
 }
 
@@ -61,6 +63,7 @@ type statusRunner interface {
 // deps is everything the App touches outside itself.
 type deps struct {
 	clk        clock.Clock
+	evClk      clock.Clock // clock of the check watcher and the traffic ticker; nil: clk (tests give it its own fake)
 	checker    checkerAPI
 	procs      procRunner
 	newClash   func(baseURL, secret string) clashapi.Client
@@ -85,7 +88,14 @@ type deps struct {
 	parentUp   func(ctx context.Context, pid int) bool
 	newSecret  func() (string, error)
 	findBinary func(name, configured string) (string, error)
+	// fileExists reports whether a file is there (the desync plan's fake
+	// payloads, see Plan.Requires). nil: not checked.
+	fileExists func(path string) bool
 	exePath    string
+	// trialProbe probes the sites through the real direct dialer (the uplink-bound one the checker uses) with
+	// the polite settings of trialAnalyzerConfig, and returns the sites that were reached. nil: no automatic
+	// desync search (tests that do not exercise it).
+	trialProbe func(ctx context.Context, domains []string) (map[string]bool, error)
 }
 
 // realDeps wires the real children and libs.
@@ -118,6 +128,7 @@ func realDeps(cfg Config, p paths.Paths) (*deps, error) {
 	d.findBinary = func(name, configured string) (string, error) {
 		return findBinary(name, configured, exe, fileExists)
 	}
+	d.fileExists = fileExists
 
 	// The procman manager kills stale processes only below the directory of our binaries.
 	pc := cfg.Procman
@@ -155,6 +166,11 @@ func realDeps(cfg Config, p paths.Paths) (*deps, error) {
 		return nil, fmt.Errorf("checker: %w", err)
 	}
 	d.checker = ck
+	trial, err := analyzer.NewRunner(trialAnalyzerConfig(cfg.Analyzer, cfg.DesyncAuto), analyzer.Deps{})
+	if err != nil {
+		return nil, fmt.Errorf("analyzer (desync search): %w", err)
+	}
+	d.trialProbe = directProbe(trial, lazy)
 	return d, nil
 }
 

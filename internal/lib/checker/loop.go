@@ -252,13 +252,21 @@ func (c *Checker) cycle(ctx context.Context, t schedule.Trigger) error {
 }
 
 // targets returns the candidate domains a trigger asks for: its domains, or all candidates.
+// Candidates with a user rule are left out: their route is fixed by the user.
 func (c *Checker) targets(t schedule.Trigger) []string {
-	if t.Domains == nil {
+	c.mu.Lock()
+	over := c.overSet
+	c.mu.Unlock()
+	if t.Domains == nil && len(over) == 0 {
 		return c.candidates
 	}
+	src := t.Domains
+	if src == nil {
+		src = c.candidates
+	}
 	var out []string
-	for _, d := range t.Domains {
-		if c.candSet[d] {
+	for _, d := range src {
+		if c.candSet[d] && !over[d] {
 			out = append(out, d)
 		}
 	}

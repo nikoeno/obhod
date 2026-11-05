@@ -1,0 +1,4 @@
+{
+  "error": "The action must be direct, desync, tunnel or block.",
+  "code": "invalid_input"
+}

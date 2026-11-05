@@ -1,6 +1,6 @@
 # Obhod design kit (from the MVP)
 
-Everything the clickable MVP (`ui/web/`) uses to look and behave the way it does, in a form the production app (Tauri + Vue + TypeScript) can import directly. Page behaviour, actions and API mapping stay in `docs/UI.md`; this folder is the visual and copy contract.
+Everything the desktop app uses to look and behave the way it does, in a form the app (Tauri + Vue + TypeScript) imports directly. It was extracted from the clickable MVP that stood in `ui/web/` until Stage B (2026-11-01); that MVP is deleted and lives in git history only. Page behaviour, actions and API mapping stay in `docs/UI.md`; this folder is the visual and copy contract.
 
 | File | What | Use in production |
 |---|---|---|
@@ -10,7 +10,7 @@ Everything the clickable MVP (`ui/web/`) uses to look and behave the way it does
 | `copy.ts` | Every user-facing sentence: route words, button states, error sentences, page text, tray | Seed for the i18n messages (vue-i18n); keep the keys |
 | `icons/` | Nav icons (24×24, stroke 1.8, `currentColor`), power icon, the Home "fan", app icon | Inline as Vue SFC icons or via `vite-svg-loader` |
 
-If a value here and `ui/web/style.css` disagree, the MVP wins until this kit is updated.
+Source of truth: the tokens are `tokens.json` (DTCG), `tokens.css` and `tokens.ts`, which must agree with each other; component styling is `ui/src/styles/app.css`, built only from those tokens. If a component value in `app.css` and this README disagree, fix the one that is wrong and keep both in step.
 
 ## 1. Principles
 
@@ -104,6 +104,12 @@ Native `<dialog>`: `bg`, 1px `border`, radius 12px, padding 20px 22px, backdrop 
 ### Toast
 Bottom-right stack (16px from edges, 8px gap): inverted (`text` fill, `bg` text), radius 10px, padding 10px 14px, 0.92rem. Visible 2.8s, fades 300ms, removed at 3.2s. For confirmations only ("Copied", "Checking all sites again…"); errors go in the page, never only in a toast.
 
+### Form fields and messages
+Text input and textarea (`.field`): `bg` fill, 1px `border`, radius 10px, padding 8px 10px, full width; the paste field is monospace (`.mono`, 0.86rem, 5 rows, resizable). Invalid: `aria-invalid="true"` and a `r-block` border. Each field has a visible `<label>` (600) and a muted 0.85rem help line wired with `aria-describedby`. The inline message under a form (`.form-msg`, `role="status"`, `aria-live="polite"`) is empty-hidden; `err` uses `warn-bg`/`warn-text`, `ok` uses `ok-bg`/`ok-text`; radius 10px, padding 8px 12px. Errors stay in the dialog, never only in a toast.
+
+### Server list and first-run card
+Server row (`.server`): 12px vertical padding, bottom `border`, name 600 with an `ok` pill "Active", then a muted line "Protocol · Address hidden" (the address, when revealed, is a tech tag). Actions: link button "Show address" (`aria-expanded`), small "Make active", small danger "Remove"; each has an `aria-label` that names the server. Row wraps on narrow widths. The first-run card (`.setup-card`): `card` fill, radius 12px, padding 16px 18px, h2 + one muted line + a primary and a default button; it sits above the big button and is replaced by the warning banner after "Skip for now".
+
 ### Tech tag
 Engine names in Details: 0.78rem muted, 1px `border`, radius 4px, padding 0 4px.
 
@@ -136,11 +142,11 @@ Durations in `tokens.*` (`press` 120ms, `toggle` 150ms, `state` 200ms, `fade` 30
 | Counts | "1 site" / "N sites" (use plural rules once localised) | |
 | Placeholder | en dash "–" for missing values | |
 
-Ellipsis is the single character "…" in labels ("Starting…", "Import server file…").
+Ellipsis is the single character "…" in labels ("Starting…", "Export diagnostics…").
 
 ## 10. Porting notes (Vue + Tauri)
 
-- `ui/web/api.js` is the only engine client; in production its functions become Tauri `invoke` commands and SSE becomes Tauri events (the Rust side holds the token, ADR 0003). Keep the payload shapes from `ui/README.md`.
-- `ui/web/store.js` maps naturally to a Pinia store (state, snapshot, routes, live traffic, checking flag).
-- The MVP stores UI settings in `localStorage`; production stores them on the Rust side (autostart, tray behaviour need it anyway).
-- Not designed in the MVP: tray icon variants, first-run screens, OS notifications, diagnostics export UI, Russian copy (the language list shows "Русский (later)").
+- Ported (Stage A and B): the engine client is the Rust side; the frontend calls Tauri `invoke` commands and listens to one Tauri event (`ui/src/backend/`; the Rust side holds the token, ADR 0003). Payload shapes are `ui/src/backend/types.ts` and `api/desktop/API.md`.
+- The store is `ui/src/store.ts` (Vue reactivity, no Pinia): state, snapshot, routes, live traffic series, checking flag.
+- UI settings are in `localStorage` for now; they move to the Rust side (autostart, tray behaviour need it anyway).
+- Not designed yet: tray icon variants, first-run screens, OS notifications, diagnostics export UI, Russian copy (the language list shows "Русский (later)").

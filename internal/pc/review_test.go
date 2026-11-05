@@ -45,8 +45,8 @@ func TestBusyStatusPortFailsBeforeTheTunnel(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.status.listenErr = errors.New("listen tcp 127.0.0.1:9091: bind: address already in use")
 	err := h.app.Run(context.Background())
-	if exitCode(err) != exitConfig || !strings.Contains(err.Error(), "status.listen") {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitConfig || !strings.Contains(err.Error(), "status.listen") {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 	if h.log.index("start sing-box") >= 0 || h.log.index("start winws2") >= 0 {
 		t.Fatalf("tunnel started although the status port was busy: %s", h.ops())
@@ -60,7 +60,7 @@ func TestSingBoxRestartFailureRollsBackConfig(t *testing.T) {
 	buf := &syncBuffer{}
 	h := newHarness(t, baseTable(t), withLog(buf))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	before := h.singBoxFile()
 	h.log.clear()
@@ -93,7 +93,7 @@ func TestSingBoxLostEndsTerminalRun(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	done := make(chan error, 1)
 	go func() { done <- h.app.Run(context.Background()) }()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.procs.mu.Lock()
 	h.procs.restartErr[nameSingBox] = []error{errors.New("bad config"), errors.New("old one fails too")}
@@ -102,8 +102,8 @@ func TestSingBoxLostEndsTerminalRun(t *testing.T) {
 	h.publishAndFire(tbl(t, ent("yt.example", route.Desync), ent("blocked.example", route.Direct)))
 	select {
 	case err := <-done:
-		if exitCode(err) != exitRuntime || !strings.Contains(err.Error(), "sing-box failed") {
-			t.Fatalf("err = %v, code %d", err, exitCode(err))
+		if ExitCode(err) != ExitRuntime || !strings.Contains(err.Error(), "sing-box failed") {
+			t.Fatalf("err = %v, code %d", err, ExitCode(err))
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatalf("Run did not end after sing-box was lost: %s", h.ops())
@@ -114,9 +114,9 @@ func TestSingBoxLostEndsTerminalRun(t *testing.T) {
 }
 
 func TestSingBoxGiveUpDisconnectsInUIMode(t *testing.T) {
-	h := newHarness(t, baseTable(t), withUI(true))
+	h := newHarness(t, baseTable(t), WithUI(true))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	if err := h.app.Connect(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestSingBoxGiveUpDisconnectsInUIMode(t *testing.T) {
 func TestEngineGiveUpIsRetriedOnNextReload(t *testing.T) {
 	h := newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.procs.crash("winws2")
 	waitUntil(t, "engine forgotten", func() bool {
@@ -162,7 +162,7 @@ func TestTUNAsUplinkNeverDrivesTheEngine(t *testing.T) {
 	// On reload: the engine keeps its interface, sing-box is still updated.
 	h = newHarness(t, baseTable(t))
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.log.clear()
 	h.mu.Lock()
@@ -186,7 +186,7 @@ func TestNFQWSUplinkChangeNeedsNewRules(t *testing.T) {
 	h.nftList = "table inet splitter {\n ip daddr 203.0.113.7 return\n oifname \"eth0\" tcp dport { 80, 443 } queue\n}"
 	h.start()
 	h.waitOp("start nfqws2")
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.log.clear()
 
@@ -216,8 +216,8 @@ func TestStaleNFTTableRefusesConnect(t *testing.T) {
 	h.app.cfg.Desync.Engine = desync.NFQWS
 	h.nftList = "table inet splitter {\n ip daddr 198.51.100.1 return\n oifname \"eth9\" queue\n}"
 	err := h.app.Run(context.Background())
-	if exitCode(err) != exitManual || !strings.Contains(err.Error(), "another plan") || !strings.Contains(err.Error(), "nft flush table inet splitter") {
-		t.Fatalf("err = %v, code %d", err, exitCode(err))
+	if ExitCode(err) != ExitManual || !strings.Contains(err.Error(), "another plan") || !strings.Contains(err.Error(), "nft flush table inet splitter") {
+		t.Fatalf("err = %v, code %d", err, ExitCode(err))
 	}
 }
 
@@ -234,7 +234,7 @@ func TestHostNameTunnelIsResolvedAndExcluded(t *testing.T) {
 	h.waitOp("start winws2")
 	eng, _ := h.procs.spec("winws2")
 	args := strings.Join(eng.Args, " ")
-	if !strings.Contains(args, "ip.DstAddr == 198.51.100.77") || !strings.Contains(args, "ipv6.DstAddr == 2001:db8::77") {
+	if !strings.Contains(args, "ip.DstAddr != 198.51.100.77") || !strings.Contains(args, "ipv6.DstAddr != 2001:db8::77") {
 		t.Fatalf("resolved tunnel addresses not excluded: %q", eng.Args)
 	}
 }
@@ -260,7 +260,7 @@ func TestDisconnectGivesUpOnBusyLock(t *testing.T) {
 }
 
 func TestUIConnectEndsWithRun(t *testing.T) {
-	h := newHarness(t, baseTable(t), withUI(true))
+	h := newHarness(t, baseTable(t), WithUI(true))
 	block := make(chan struct{})
 	h.d.uplink = func(ctx context.Context) (netif.Interface, error) {
 		select {
@@ -271,7 +271,7 @@ func TestUIConnectEndsWithRun(t *testing.T) {
 		return h.uplink, nil
 	}
 	stop := h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	connected := make(chan error, 1)
 	go func() { connected <- h.app.Connect(context.Background()) }() // the UI's context never ends
 	waitUntil(t, "connecting", func() bool { return h.app.State() == StateConnecting })
@@ -291,7 +291,7 @@ func TestLogNeverHoldsSecrets(t *testing.T) {
 	h := newHarness(t, baseTable(t), withLog(buf))
 	h.app.outbounds.Tunnel = json.RawMessage(`{"type":"vless","server":"203.0.113.7","server_port":443,"uuid":"11111111-2222-3333-4444-555555555555"}`)
 	h.start()
-	h.waitOp("status.start")
+	h.waitRunning()
 	h.fc.Advance(time.Minute)
 	h.publishAndFire(tbl(t, ent("yt.example", route.Desync), ent("blocked.example", route.Direct)))
 	h.waitOp("restart sing-box")
@@ -322,6 +322,25 @@ func TestNFTMissing(t *testing.T) {
 	stale := strings.NewReplacer("eth0", "wlan0", "203.0.113.7", "203.0.113.8").Replace(full)
 	if m := strings.Join(nftMissing(stale, setup), " "); !strings.Contains(m, `oifname "eth0"`) || !strings.Contains(m, "203.0.113.7") {
 		t.Fatalf("missing = %v", m)
+	}
+}
+
+func TestNFTMissingDestinationPorts(t *testing.T) {
+	setup := []string{
+		`nft 'add rule inet splitter postrouting oifname "eth0" tcp dport { 80, 443, 2053 } queue num 200 bypass'`,
+		`nft 'add rule inet splitter postrouting oifname "eth0" udp dport { 443 } queue num 200 bypass'`,
+	}
+	ok := "oifname \"eth0\" tcp dport { 80, 443, 2053 } queue\noifname \"eth0\" udp dport { 443 } queue"
+	if m := nftMissing(ok, setup); len(m) != 0 {
+		t.Fatalf("missing = %v", m)
+	}
+	// A table written for the custom strategy (ports 80, 443, tcp only) lacks a port and the udp rule.
+	old := "oifname \"eth0\" tcp dport { 80, 443 } queue"
+	got := strings.Join(nftMissing(old, setup), "; ")
+	for _, want := range []string{"tcp port 2053", "udp dport"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing = %q, want it to mention %q", got, want)
+		}
 	}
 }
 

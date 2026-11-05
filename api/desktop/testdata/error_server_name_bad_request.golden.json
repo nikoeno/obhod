@@ -1,0 +1,4 @@
+{
+  "error": "name must be 1 to 60 printable characters.",
+  "code": "bad_request"
+}

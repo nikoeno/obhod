@@ -1,0 +1,12 @@
+[
+  {
+    "id": "alt2-multisplit",
+    "name": "ALT2 (multisplit)",
+    "description": "Splits the first packet and hides a decoy prefix in front of it."
+  },
+  {
+    "id": "alt3-hostfakesplit",
+    "name": "ALT3 (host fake split)",
+    "description": "Sends a fake hello, then splits the real one around a fake host name."
+  }
+]

@@ -1,0 +1,1 @@
+vless://00000000-0000-4000-8000-000000000000@[2001:db8::7]:443?security=tls&sni=example.com&type=grpc&serviceName=svc#VLESS%20gRPC%20IPv6

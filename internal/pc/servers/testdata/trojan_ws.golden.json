@@ -1,0 +1,24 @@
+{
+  "protocol": "trojan",
+  "host": "203.0.113.30",
+  "port": 8443,
+  "engine": "singbox",
+  "name": "Trojan WS",
+  "outbound": {
+    "password": "fake-pass@word",
+    "server": "203.0.113.30",
+    "server_port": 8443,
+    "tls": {
+      "enabled": true,
+      "server_name": "example.com"
+    },
+    "transport": {
+      "headers": {
+        "Host": "example.com"
+      },
+      "path": "/t",
+      "type": "ws"
+    },
+    "type": "trojan"
+  }
+}

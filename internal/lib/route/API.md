@@ -6,11 +6,11 @@
 | Kind | lib |
 | Binary | – |
 | Purpose | defines the route kinds, domain normalization and the RouteTable shared by all modules |
-| Consumers | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop, lab |
+| Consumers | internal/blockanalyzer, internal/lib/analyzer, internal/lib/analyzer/dialer, internal/lib/checker, internal/lib/checker/decide, internal/lib/checker/lib/model, internal/lib/checker/lists, internal/lib/checker/schedule, internal/pc, internal/pc/desync, internal/pc/monitor, internal/pc/sites, internal/pc/singbox, internal/pc/status, internal/router, internal/router/podkop, lab |
 | Children | – |
 | Uses libs | – |
 | Build tags | – |
-| Status | implemented: Route, Parse, Normalize, Source, Entry, Table, Diff |
+| Status | implemented: Route, Parse, Normalize, Source (incl. SourceUser), Entry, Table, Diff |
 
 ## Responsibility
 
@@ -44,6 +44,7 @@ const (
     SourceStatic  Source = "static"  // from proxy/block lists; never changed by the checker
     SourceChecked Source = "checked" // decided by the checker from probes
     SourceDefault Source = "default" // safe default for an unknown network (no probe yet)
+    SourceUser    Source = "user"    // set by the user (per-site rule); added 2026-11-01, additive
 )
 
 // Entry routes a domain and all its subdomains.
@@ -81,7 +82,7 @@ func Normalize(domain string) (string, error)
 ## Behavior / contract
 
 - `Lookup("a.b.example.com")` matches the entry `example.com` unless a longer entry such as `b.example.com` exists.
-- `NewTable` returns an error for invalid routes or domains. For duplicate domains the last entry wins, but a `SourceStatic` entry is never overridden by other sources.
+- `NewTable` returns an error for invalid routes or domains. For duplicate domains the last entry wins, but a `SourceUser` entry is never overridden by an entry of another source, and a `SourceStatic` entry is never overridden by one that is neither user nor static (rank: user > static > checked = default), whatever the order of the input.
 - `Table` is a value. Consumers must not mutate `Entries` in place.
 
 ## Config

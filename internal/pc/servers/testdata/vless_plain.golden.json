@@ -1,0 +1,13 @@
+{
+  "protocol": "vless",
+  "host": "192.0.2.10",
+  "port": 443,
+  "engine": "singbox",
+  "name": "Plain VLESS",
+  "outbound": {
+    "server": "192.0.2.10",
+    "server_port": 443,
+    "type": "vless",
+    "uuid": "00000000-0000-4000-8000-000000000000"
+  }
+}

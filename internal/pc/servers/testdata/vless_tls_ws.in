@@ -1,0 +1,1 @@
+vless://00000000-0000-4000-8000-000000000000@example.com:443?security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws%3Fed%3D2048&alpn=h2%2Chttp%2F1.1&fp=chrome&packetEncoding=xudp#VLESS%20WS

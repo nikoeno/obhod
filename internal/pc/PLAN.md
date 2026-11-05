@@ -1,12 +1,12 @@
 # Implementation plan — pc (internal/pc)
 
-Status: M1-M11 are done (all `internal/pc` modules are `implemented`; M11's manual part is the checklist in `SMOKE.md`). M12 (control API for the desktop UI) is open and blocked on the G15 decision and an approved contract. Each module's `API.md` is the source of truth; this file keeps the order of the work, the contract gaps and how each was closed. Delete it (or fold the leftovers into a `DESIGN.md`) when M12 is done.
+Status: M1-M11 are done (all `internal/pc` modules are `implemented`; M11's manual part is the checklist in `SMOKE.md`). M12 (control API for the desktop UI) is implemented (2026-10-31): the contract is `api/desktop/API.md`, the `pc` exports are in `internal/pc/API.md`. M13 (server management, ADR 0004 milestone 4) is implemented (2026-10-31). Each module's `API.md` is the source of truth; this file keeps the order of the work, the contract gaps and how each was closed. Delete it (or fold the leftovers into a `DESIGN.md`) when M12 is done.
 
 ## 0. Starting point
 
 | Module | State | Needs |
 |---|---|---|
-| `internal/pc` (root, `splitter`) | implemented (M9, M10); M12 open | all children below |
+| `internal/pc` (root; the `splitter` app is `api/desktop`) | implemented (M9, M10, M12 exports) | all children below |
 | `internal/pc/singbox` | implemented (M1) | `route` |
 | `internal/pc/lib/clashapi` | implemented (M2) | – |
 | `internal/pc/procman` | implemented (M3) | `proc`, `clock` |
@@ -15,6 +15,7 @@ Status: M1-M11 are done (all `internal/pc` modules are `implemented`; M11's manu
 | `internal/pc/desync/nfqws` | implemented (M5) | – |
 | `internal/pc/monitor` | implemented (M7) | `clashapi`, `analyzer`, `route`, `clock` |
 | `internal/pc/status` | implemented (M8) | `clashapi`, `route` |
+| `internal/pc/servers` | implemented (M13) | – (the dry run is injected by `pc`) |
 | `internal/lib/checker`, `analyzer`, `route`, `netif`, `proc`, `clock`, `paths`, `version` | implemented | – |
 
 Every library the pc tree needs already exists, so the work goes bottom-up with no stubs outside `internal/pc`.
@@ -102,7 +103,7 @@ Tests: re-exec the test binary as the helper (`TestHelperProcess` pattern, modes
 Files: `winws.go`, `filter.go` (WinDivert filter builder), `winws_test.go`, `testdata/*.golden`.
 
 - Hostlist: sorted, deduped, one domain per line, `\n` endings. Args reference it as `hostlist.txt` (resolved relative to the process `Dir`).
-- Filter: `outbound and tcp and (tcp.DstPort == 443 or …) and ifIdx == N and not (ip.DstAddr in excludes / ipv6.DstAddr …) and not (tcp.SrcPort >= a and tcp.SrcPort <= b …)`. Build it from small helpers so each clause can be unit-tested.
+- Filter: `ifIdx == N and (ipv6 or ip.DstAddr < a or ip.DstAddr > b) and (ip or ipv6.DstAddr …) and (not tcp or tcp.SrcPort < a or tcp.SrcPort > b)` (WinDivert cannot negate a group, so no `not (...)`; winws2 adds the outbound/port part itself). Build it from small helpers so each clause can be unit-tested.
 - Validation: at least one domain, `IfIndex > 0`, valid prefixes, `from <= to` for every port range.
 - zapret2 order: `--wf-tcp-out=<Ports>`, `--wf-raw-filter=<filter>` (ANDed with the rest by winws2), `--lua-init=@<LuaDir>/zapret-lib.lua`, `--lua-init=@<LuaDir>/zapret-antidpi.lua`, `--hostlist=hostlist.txt`, then the Lua strategy args verbatim (`--filter-l7`, `--payload`, `--out-range`, `--lua-desync=...`).
 
@@ -195,16 +196,25 @@ Tests (all fakes, fake clock): connect → disconnect → connect (processes sto
 
 ### M12 — control API for the desktop UI
 
-Needs: M10, and a decision on G15 (where the API lives). Contract first: write the endpoint list into the chosen module's `API.md` and get it approved before coding.
+Needs: M10, and a decision on G15 (where the API lives: decided, `api/desktop`). Contract first: the full contract (listener, auth, endpoints, events, errors, proposed `pc` exports, tests, open questions) is written in `api/desktop/API.md`, section "Control API (M12)". It is **approved (human, 2026-10-31; all nine open questions decided as recommended)**. The bullets below are the summary; where they differ, `api/desktop/API.md` wins.
 
 - Versioned JSON under `/api/v1/`, loopback only, same hardening as M8 (Host check, no CORS, timeouts).
-- Token **required** (unlike the optional status token): `Authorization: Bearer <token>`, constant-time compare. Token handoff in v1 (G18): the UI writes a random token to a file in its own per-user directory and passes the file path as `--token-file`; `splitter` reads it once, keeps it in memory and never logs it. The UI picks the port, or passes `127.0.0.1:0` and reads the chosen port from a line `splitter` prints on stdout (decide in M12).
+- Token **required** (unlike the optional status token): `Authorization: Bearer <token>`, constant-time compare. Token handoff in v1 (G18): the UI writes a random token to a file in its own per-user directory and passes the file path as `--token-file`; `splitter` reads it once, keeps it in memory and never logs it. Proposed: `--listen 127.0.0.1:0` and one stdout line `OBHOD-API v1 <host:port>` once the app is ready (plus an optional `--addr-file`); see `api/desktop/API.md`.
 - Read: `GET /api/v1/state` (connected/disconnected/starting/stopping + the status `Snapshot`), `GET /api/v1/routes` (the current table), `GET /api/v1/processes`, `GET /api/v1/logs?name=` (procman ring buffers), `GET /api/v1/version`.
 - Actions (POST, JSON body, idempotent where possible): `connect`, `disconnect`, `check-now` (optional domains → `checker.CheckNow`), `shutdown`. Later, after a separate decision: a per-domain route override and a list reload.
 - Events: `GET /api/v1/events` as Server-Sent Events (stdlib only): state changes, table changes (`route.Diff`), procman events, a traffic tick every few seconds. No full hostnames unless debug is on, same rule as the monitor.
 - Errors: JSON `{ "error": "...", "code": "..." }` with HTTP status codes; a missing/wrong token → 401 with no body detail.
 
 Tests: `httptest` with a fake App: the token is required, actions call the right App methods, state transitions are visible on the event stream, a non-loopback listen address is rejected, no CORS headers, the SSE stream ends on shutdown. A golden JSON for each GET.
+
+### M13 — server management (ADR 0004 milestone 4)
+
+Done 2026-10-31. Contracts: `internal/pc/servers/API.md` (parsers, validation, storage, activation), `internal/pc/API.md` (exports, the cached tunnel outbound, the UI-mode pre-flight change) and `api/desktop/API.md` (endpoints, decisions 12-23). Summary of what changed in `internal/pc`:
+
+- Pre-flight in UI mode no longer fails when the `tunnel` file is missing; `Connect` answers `tunnel_missing`, the reload loop only keeps the table current. Without the UI, `run` still exits 1 as before.
+- `ActivateServer` replaces the cached tunnel outbound and the secret file; while connected it triggers the reload path through `kick`, subject to the 30 s restart gap, with a rollback of the file, the cache and the active mark when the new config is rejected or sing-box does not start (`connect_failed` in `LastError`).
+- `AddServer`, `ActivateServer` and `DeleteServer` take the op lock; `Servers` and `TestServer` do not.
+- Not done on purpose: the Xray sidecar (L11), subscription URLs, groups and failover, the `proxy` outbound, an online reachability test.
 
 ## 2. Decisions on the contract gaps
 
@@ -236,10 +246,10 @@ Desktop UI (ADR 0003):
 
 | # | Module | Item | State |
 |---|---|---|---|
-| G15 | pc / status | where the control API lives | **Open:** a new child `internal/pc/control`, or extend `internal/pc/status`. An API/placement change: ask, then update `API.md` and `docs/architecture.md` |
+| G15 | pc / status | where the control API lives | **Decided (ADR 0004):** the gateway `api/desktop`, not a child of `internal/pc`. Contract: `api/desktop/API.md`. Decided (2026-10-31): keep `internal/pc/status` alongside for now, remove it after the UI ships (separate change) |
 | G16 | pc | a disconnected state (checker running, sing-box/desync stopped) | **Decided:** in M10; `run` connects at once, `run --ui` starts disconnected. Update `internal/pc/API.md` (CLI and startup order) in M10 |
 | G17 | pc | an elevated `splitter` started by the UI must die with the UI | **Decided (v1):** `--parent-pid`; when a service replaces the UAC launch, this goes away |
-| G18 | pc / control | token handoff between the UI and `splitter` | **Proposed:** `--token-file` written by the UI in its per-user directory; never on the command line itself (other processes can read command lines) |
+| G18 | pc / control | token handoff between the UI and `splitter` | **Decided 2026-10-31 (details in `api/desktop/API.md`, Auth):** `--token-file` written by the UI in its per-user directory, read once, kept in memory, never logged; never on the command line itself (other processes can read command lines); missing or empty file = exit 1 |
 
 DNS reject notification (from D1, `docs/REVIEW-DECIDE.md`):
 
@@ -250,7 +260,7 @@ DNS reject notification (from D1, `docs/REVIEW-DECIDE.md`):
 ## 3. Not in this plan
 
 - Strategy discovery for the desync engine (the "future strategy finder"); `Strategy` comes from config.
-- Per-domain route overrides and list editing from the UI (after M12, separate decision).
+- Per-domain route overrides: done 2026-11-01 (user-approved, Go side; `internal/pc/sites`, `api/desktop/API.md` "Per-site rules"). List-file editing from the UI: still not planned.
 - The Tauri app itself (its own tree, see ADR 0003 Open).
 - Service installation (Windows service, systemd unit); v1 uses a UAC/pkexec prompt per connect (ADR 0003).
 - The lab scenarios (`lab/*`); nfqws gets its real-packet test there.

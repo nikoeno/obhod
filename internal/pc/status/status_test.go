@@ -39,6 +39,8 @@ func sample() Snapshot {
 		Processes: []Process{{Name: "sing-box", State: "running"}, {Name: "winws2", State: "running", Restarts: 1}},
 		Warnings:  []string{"probe port blocked"},
 		Recent:    []Change{{Domain: "example.org", From: route.Tunnel, To: route.Desync, At: at}},
+		Tunnel:    TunnelReady,
+		Problems:  []Problem{{Code: ProblemDesyncFailed, Message: "The desync program could not start. Picky sites may not open.", Detail: "Exit: gave up after 5 restarts: exit status 87\nOutput:\nwinws2.exe: filter error"}},
 	}
 }
 

@@ -1,0 +1,4 @@
+{
+  "error": "The list is full (20 servers). Remove one first.",
+  "code": "limit_reached"
+}

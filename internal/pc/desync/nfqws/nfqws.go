@@ -34,24 +34,42 @@ const (
 var (
 	defaultLuaInit = []string{"zapret-lib.lua", "zapret-antidpi.lua"}
 	defaultPorts   = []uint16{443, 80}
+	// luaName is what a blob name may be: it becomes a Lua global variable.
+	luaName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	// ifaceName is what a Linux interface name may contain here; it keeps
 	// the name safe inside an nft string and a shell.
 	ifaceName = regexp.MustCompile(`^[A-Za-z0-9_.:@+-]{1,15}$`)
 )
+
+// Blob is a binary payload that nfqws2 loads into the Lua variable Name
+// (--blob=Name:@Path). Lua instances refer to it by Name.
+type Blob struct {
+	Name string // a Lua identifier
+	Path string // file to load; the caller has checked it is one of its own files
+}
 
 // Input is everything needed to render a nfqws2 command line and its nft rules.
 type Input struct {
 	Binary       string   // path to nfqws2
 	LuaDir       string   // default: <dir of Binary>/lua
 	LuaInit      []string // default zapret-lib.lua, zapret-antidpi.lua
-	Strategy     []string // zapret2 profile args, passed through verbatim
+	Strategy     []string // zapret2 profile args, passed through verbatim (one profile); not with Profiles
 	Hostlist     []string
 	Uplink       string // oifname
 	QueueNum     uint16 // default 200
 	ExcludeIPs   []netip.Prefix
 	ExcludePorts [][2]uint16
-	Ports        []uint16
-	Mark         uint32 // mark nfqws2 puts on its own packets (avoid loops); default 0x40000000 (zapret2 default)
+	Ports        []uint16 // TCP destination ports to queue; default 80, 443
+	Mark         uint32   // mark nfqws2 puts on its own packets (avoid loops); default 0x40000000 (zapret2 default)
+
+	// Profiles is the multi-profile form: each entry holds the match and
+	// instance options of one profile (--filter-tcp=..., --payload=...,
+	// --lua-desync=...). The renderer starts every profile with
+	// --hostlist=hostlist.txt and separates them with --new, so none of them
+	// can leave the hostlist. Not combined with Strategy.
+	Profiles [][]string
+	UDPPorts []uint16 // UDP destination ports to queue (an extra nft rule); only with Profiles
+	Blobs    []Blob   // --blob options placed before the profiles; only with Profiles
 }
 
 // Output is the rendered command line, hostlist and nft command lists.
@@ -76,9 +94,21 @@ func Render(in Input) (Output, error) {
 	if err != nil {
 		return Output{}, err
 	}
-	ports, err := portList(in.Ports)
+	if len(in.Profiles) > 0 && len(in.Strategy) > 0 {
+		return Output{}, fmt.Errorf("%w: Strategy and Profiles are exclusive", ErrInvalid)
+	}
+	if len(in.Profiles) == 0 && (len(in.UDPPorts) > 0 || len(in.Blobs) > 0) {
+		return Output{}, fmt.Errorf("%w: UDPPorts and Blobs need Profiles", ErrInvalid)
+	}
+	ports, err := portList(in.Ports, defaultPorts)
 	if err != nil {
 		return Output{}, err
+	}
+	var udpPorts []uint16
+	if len(in.UDPPorts) > 0 {
+		if udpPorts, err = portList(in.UDPPorts, nil); err != nil {
+			return Output{}, err
+		}
 	}
 	for _, p := range in.ExcludeIPs {
 		if !p.IsValid() {
@@ -116,14 +146,34 @@ func Render(in Input) (Output, error) {
 		}
 		args = append(args, "--lua-init=@"+luaDir+"/"+f)
 	}
-	args = append(args, "--hostlist="+HostlistName, Identity)
-	args = append(args, in.Strategy...)
+	if len(in.Profiles) == 0 {
+		args = append(args, "--hostlist="+HostlistName, Identity)
+		args = append(args, in.Strategy...)
+	} else {
+		args = append(args, Identity)
+		for _, b := range in.Blobs {
+			if !luaName.MatchString(b.Name) || b.Path == "" || strings.ContainsAny(b.Path, "\r\n") || strings.HasPrefix(b.Path, "+") {
+				return Output{}, fmt.Errorf("%w: blob %q", ErrInvalid, b.Name)
+			}
+			args = append(args, "--blob="+b.Name+":@"+b.Path)
+		}
+		for i, p := range in.Profiles {
+			if len(p) == 0 {
+				return Output{}, fmt.Errorf("%w: empty profile %d", ErrInvalid, i)
+			}
+			if i > 0 {
+				args = append(args, "--new")
+			}
+			args = append(args, "--hostlist="+HostlistName)
+			args = append(args, p...)
+		}
+	}
 
 	return Output{
 		Path:     in.Binary,
 		Args:     args,
 		Hostlist: hostlist,
-		NFTSetup: append(nftRules(in.Uplink, qnum, mark, ports, in.ExcludeIPs, in.ExcludePorts), ipRuleSetup(mark)...),
+		NFTSetup: append(nftRules(in.Uplink, qnum, mark, ports, udpPorts, in.ExcludeIPs, in.ExcludePorts), ipRuleSetup(mark)...),
 		NFTDown:  append(nftDown(), ipRuleDown(mark)...),
 	}, nil
 }
@@ -148,10 +198,11 @@ func renderHostlist(domains []string) ([]byte, error) {
 	return []byte(strings.Join(list, "\n") + "\n"), nil
 }
 
-// portList returns the destination ports sorted and deduplicated.
-func portList(ports []uint16) ([]uint16, error) {
+// portList returns the destination ports sorted and deduplicated. An empty
+// list becomes def.
+func portList(ports, def []uint16) ([]uint16, error) {
 	if len(ports) == 0 {
-		ports = defaultPorts
+		ports = def
 	}
 	set := make(map[uint16]struct{}, len(ports))
 	for _, p := range ports {

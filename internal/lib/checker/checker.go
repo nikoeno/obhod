@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -108,6 +109,8 @@ type Checker struct {
 	candidates []string // sorted
 	candSet    map[string]bool
 	static     []route.Entry
+	overrides  []route.Entry // user rules (SourceUser), sorted by domain; guarded by mu
+	overSet    map[string]bool
 
 	table atomic.Pointer[route.Table]
 
@@ -258,7 +261,7 @@ func (c *Checker) publish(t route.Table) {
 	}
 }
 
-// ReportFailure feeds a live connection failure into the failure threshold. Failures of static entries, of
+// ReportFailure feeds a live connection failure into the failure threshold. Failures of static and user entries, of
 // unknown domains, or on a route other than the current one are ignored.
 func (c *Checker) ReportFailure(f Failure) {
 	c.mu.Lock()
@@ -268,10 +271,42 @@ func (c *Checker) ReportFailure(f Failure) {
 		return
 	}
 	e, ok := c.Table().Lookup(f.Domain)
-	if !ok || e.Source == route.SourceStatic || e.Route != f.Route {
+	if !ok || e.Source == route.SourceStatic || e.Source == route.SourceUser || e.Route != f.Route {
 		return
 	}
 	c.sched.Failure(modelID(net.ID), e.Domain, f.Route, f.At)
+}
+
+// SetOverrides replaces the user's per-domain rules and rebuilds the table at once (a new table is published
+// when it differs). Every entry needs a valid route and a normalizable domain; its Source is set to
+// SourceUser. For the same domain the last entry wins. A user entry beats a list entry of the same domain
+// (static or candidate); a list entry of a longer (more specific) domain still wins for its own names, as
+// in Table.Lookup. Overridden candidates are not probed while the rule exists and keep their stored
+// decisions, so removing the rule returns the domain to them. On error nothing changes.
+func (c *Checker) SetOverrides(entries []route.Entry) error {
+	byDomain := make(map[string]route.Entry, len(entries))
+	for _, e := range entries {
+		if !e.Route.Valid() {
+			return fmt.Errorf("checker: %w: %q", route.ErrInvalidRoute, string(e.Route))
+		}
+		d, err := route.Normalize(e.Domain)
+		if err != nil {
+			return fmt.Errorf("checker: %w", err)
+		}
+		byDomain[d] = route.Entry{Domain: d, Route: e.Route, Source: route.SourceUser}
+	}
+	out := make([]route.Entry, 0, len(byDomain))
+	set := make(map[string]bool, len(byDomain))
+	for d, e := range byDomain {
+		out = append(out, e)
+		set[d] = true
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
+	c.mu.Lock()
+	c.overrides, c.overSet = out, set
+	c.mu.Unlock()
+	c.rebuild()
+	return nil
 }
 
 // CheckNow schedules an immediate check of the given domains (all candidates if none).

@@ -1,0 +1,35 @@
+{
+  "protocol": "vless",
+  "host": "example.com",
+  "port": 443,
+  "engine": "singbox",
+  "name": "VLESS WS",
+  "outbound": {
+    "packet_encoding": "xudp",
+    "server": "example.com",
+    "server_port": 443,
+    "tls": {
+      "alpn": [
+        "h2",
+        "http/1.1"
+      ],
+      "enabled": true,
+      "server_name": "example.com",
+      "utls": {
+        "enabled": true,
+        "fingerprint": "chrome"
+      }
+    },
+    "transport": {
+      "early_data_header_name": "Sec-WebSocket-Protocol",
+      "headers": {
+        "Host": "example.com"
+      },
+      "max_early_data": 2048,
+      "path": "/ws",
+      "type": "ws"
+    },
+    "type": "vless",
+    "uuid": "00000000-0000-4000-8000-000000000000"
+  }
+}

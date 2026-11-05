@@ -68,6 +68,11 @@ func (c *Checker) ReportFailure(f Failure)
 // CheckNow schedules an immediate check of the given domains (all candidates if none).
 func (c *Checker) CheckNow(domains ...string)
 
+// SetOverrides replaces the user's per-domain rules (entries get Source = route.SourceUser) and
+// rebuilds and publishes the table at once. Invalid route or domain: error, nothing changes.
+// Added 2026-11-01 for the per-site rules of internal/pc/sites.
+func (c *Checker) SetOverrides(entries []route.Entry) error
+
 func (c *Checker) Status() Status
 
 // FakeNetwork is a scripted NetworkSource for tests (here and in apps).
@@ -101,7 +106,7 @@ The cycle, on each trigger from `schedule`:
 1. Pick targets: the trigger's domains, or all candidates from `lists`.
 2. `Runner.Run` with the configured dialers. If calibration fails (no internet), make no decision changes.
 3. For each domain, `decide.Decide(current, results)` → `store.Put`.
-4. Rebuild the table: static entries (proxy/block, never changed) + stored decisions for this network + `SourceDefault` entries for candidates with no decision.
+4. Rebuild the table: static entries (proxy/block, never changed) + stored decisions for this network + `SourceDefault` entries for candidates with no decision + the user overrides (`SetOverrides`) last.
 5. Publish it if it differs from the previous table.
 
 Other rules:
@@ -112,6 +117,7 @@ Other rules:
 - **Failures:** `ReportFailure` maps the domain to its table entry by suffix; static entries and failures on a route other than the current one are ignored. A live failure does not count as a decision confirmation, it only triggers a recheck.
 - **Expiry:** at start and on network switch, expired decisions trigger one targeted recheck; afterwards a timer fires at the earliest upcoming expiry. An inconclusive recheck is not retried by this path (the periodic check covers it).
 - **Start:** `Run` prunes networks unseen for `Retention` and decisions of domains no longer candidates.
+- **User overrides** (`SetOverrides`): an entry of the same domain beats every list entry (static, checked, default; `route.NewTable` ranks `SourceUser` highest). A list entry of a longer, more specific domain keeps winning for its own names (`Table.Lookup`). An overridden candidate is not probed while its rule exists, but its stored decisions are kept; removing the rule returns the domain to them (or to the default). A rule for a domain in no list adds an entry (visible in the table); removing it removes the entry. Failures of user entries are ignored like static ones. Overrides are in memory only: the caller (internal/pc) persists them and sets them again at start.
 - **Expired entries** are still used, and trigger a recheck.
 - Only one check runs at a time. Triggers arriving during a run are merged.
 
